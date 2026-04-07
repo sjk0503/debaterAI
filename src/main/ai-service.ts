@@ -20,7 +20,7 @@ const store = new Store<{ settings: AISettings }>({
         maxTokens: 8192,
       },
       debate: {
-        mode: 'auto',
+        mode: 'debate',
         maxRounds: 3,
         autoApply: false,
         soloMode: 'debate',

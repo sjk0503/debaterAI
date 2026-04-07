@@ -8,18 +8,60 @@ import { DebateMessage } from '../shared/types';
 declare global {
   interface Window {
     api: {
+      // Debate
       startDebate: (prompt: string, projectPath: string) => Promise<string>;
       intervene: (decision: string) => Promise<any>;
       applyCode: (debateId: string) => Promise<any>;
       onDebateMessage: (cb: (msg: DebateMessage) => void) => () => void;
       onDebateStatus: (cb: (status: any) => void) => () => void;
+      // Settings
       getSettings: () => Promise<any>;
       saveSettings: (settings: any) => Promise<any>;
+      // Project
       getFiles: (projectPath: string) => Promise<any>;
       readFile: (filePath: string) => Promise<string>;
       writeFile: (filePath: string, content: string) => Promise<any>;
       getProjectContext: (projectPath: string, maxFiles?: number) => Promise<string>;
+      // Dialog
       openDirectory: () => Promise<string | null>;
+      // Search
+      searchGrep: (projectPath: string, query: string, options?: any) => Promise<any>;
+      searchFiles: (projectPath: string, query: string, options?: any) => Promise<any>;
+      searchStats: (projectPath: string) => Promise<any>;
+      // Permissions
+      permissionGetRules: () => Promise<any>;
+      permissionAddRule: (rule: any) => Promise<any>;
+      permissionRemoveRule: (index: number) => Promise<any>;
+      permissionCheck: (request: any) => Promise<boolean>;
+      onPermissionRequest: (cb: (request: any) => void) => () => void;
+      respondPermission: (decision: string) => void;
+      // Claude Code
+      claudeCodeIsAvailable: () => Promise<boolean>;
+      claudeCodeAuthStatus: () => Promise<any>;
+      claudeCodeExecute: (prompt: string, cwd: string, options?: any) => Promise<any>;
+      claudeCodeExecuteStream: (id: string, prompt: string, cwd: string, options?: any) => Promise<any>;
+      claudeCodeRunTeam: (tasks: any[]) => Promise<any>;
+      claudeCodeKill: (id: string) => Promise<boolean>;
+      onClaudeCodeData: (cb: (data: any) => void) => () => void;
+      onClaudeCodeComplete: (cb: (data: any) => void) => () => void;
+      onClaudeCodeTaskUpdate: (cb: (data: any) => void) => () => void;
+      // Terminal
+      terminalExec: (command: string, cwd: string, timeout?: number) => Promise<any>;
+      terminalExecStream: (id: string, command: string, cwd: string) => Promise<any>;
+      terminalKill: (id: string) => Promise<boolean>;
+      onTerminalData: (cb: (data: any) => void) => () => void;
+      onTerminalExit: (cb: (data: any) => void) => () => void;
+      // Git
+      gitIsRepo: (projectPath: string) => Promise<boolean>;
+      gitStatus: (projectPath: string) => Promise<string>;
+      gitBranches: (projectPath: string) => Promise<string[]>;
+      gitCurrentBranch: (projectPath: string) => Promise<string>;
+      gitCommit: (projectPath: string, message: string) => Promise<string>;
+      gitDiff: (projectPath: string, cached?: boolean) => Promise<string>;
+      gitLog: (projectPath: string, count?: number) => Promise<string>;
+      gitCreateWorktree: (projectPath: string, debateId: string, baseBranch?: string) => Promise<any>;
+      gitListWorktrees: (projectPath: string) => Promise<any>;
+      gitCompleteDebate: (projectPath: string, worktreePath: string, branchName: string, commitMessage: string) => Promise<any>;
     };
   }
 }

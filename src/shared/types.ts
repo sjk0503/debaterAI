@@ -3,7 +3,7 @@
 // ============================================================================
 
 export type AIProvider = 'claude' | 'codex';
-export type DebateMode = 'auto' | 'guided' | 'watch';
+export type DebateMode = 'debate' | 'claude-only' | 'codex-only';
 export type DebateStatus = 'idle' | 'thinking' | 'debating' | 'consensus' | 'coding' | 'done' | 'error';
 export type Agreement = 'agree' | 'partial' | 'disagree';
 export type MessageRole = 'user' | 'claude' | 'codex' | 'system';

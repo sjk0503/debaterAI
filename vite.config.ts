@@ -25,7 +25,10 @@ export default defineConfig({
         },
         vite: {
           build: {
-            outDir: 'dist/preload',
+            outDir: 'dist/main',
+            rollupOptions: {
+              external: ['electron'],
+            },
           },
         },
       },

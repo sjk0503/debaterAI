@@ -113,12 +113,23 @@ export class DebateEngine {
   }
 
   /**
-   * 토론 루프
+   * 토론 루프 — 모드에 따라 분기
    */
   private async runDebateLoop(debateId: string) {
     const session = this.sessions.get(debateId);
     if (!session) return;
 
+    if (session.mode === 'claude-only') {
+      await this.runSoloLoop(debateId, 'claude');
+      return;
+    }
+
+    if (session.mode === 'codex-only') {
+      await this.runSoloLoop(debateId, 'codex');
+      return;
+    }
+
+    // 기본 debate 모드
     for (let round = 1; round <= session.maxRounds; round++) {
       session.currentRound = round;
       this.setStatus(debateId, 'debating');
@@ -235,6 +246,81 @@ export class DebateEngine {
       timestamp: Date.now(),
     });
     await this.generateCode(debateId);
+  }
+
+  /**
+   * 솔로 모드 — 단일 AI만 사용하여 바로 코드 생성
+   */
+  private async runSoloLoop(debateId: string, agent: 'claude' | 'codex') {
+    const session = this.sessions.get(debateId);
+    if (!session) return;
+
+    session.currentRound = 1;
+    this.setStatus(debateId, 'debating');
+
+    const agentLabel = agent === 'claude' ? '🟣 Claude' : '🟢 Codex';
+    this.emit({
+      id: uuidv4(),
+      role: 'system',
+      content: `${agentLabel} 단독 모드로 진행합니다.`,
+      timestamp: Date.now(),
+    });
+
+    const ctx = session.projectContext || '';
+    const soloPrompt = `User request: "${session.prompt}"
+
+Project path: ${session.projectPath}
+
+${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Provide the complete implementation with code. For each file, use this format:
+--- FILE: path/to/file.ts ---
+\`\`\`typescript
+// code here
+\`\`\``;
+
+    const role = agent === 'claude' ? 'claude' as const : 'codex' as const;
+    const systemPrompt = agent === 'claude' ? CLAUDE_SYSTEM : CODEX_SYSTEM;
+
+    const msg: DebateMessage = {
+      id: uuidv4(),
+      role,
+      content: '',
+      timestamp: Date.now(),
+      round: 1,
+    };
+    this.emit(msg);
+
+    let response = '';
+    if (agent === 'claude') {
+      response = await this.ai.askClaude(
+        systemPrompt,
+        [{ role: 'user', content: soloPrompt }],
+        (chunk) => {
+          msg.content += chunk;
+          this.emit({ ...msg, content: msg.content });
+        },
+      );
+    } else {
+      response = await this.ai.askCodex(
+        systemPrompt,
+        [{ role: 'user', content: soloPrompt }],
+        (chunk) => {
+          msg.content += chunk;
+          this.emit({ ...msg, content: msg.content });
+        },
+      );
+    }
+
+    msg.content = response;
+    session.messages.push(msg);
+
+    // 솔로 모드에서는 바로 코드 생성 완료
+    this.setStatus(debateId, 'done');
+    this.emit({
+      id: uuidv4(),
+      role: 'system',
+      content: `🎉 ${agentLabel} 코드 생성 완료! 리뷰 후 적용하세요.`,
+      timestamp: Date.now(),
+    });
   }
 
   /**

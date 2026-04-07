@@ -94,9 +94,7 @@ function setupIPC() {
 
   // 프로젝트 파일 목록
   ipcMain.handle('project:files', async (_event, { projectPath }) => {
-    const fs = await import('fs/promises');
-    const files = await getFileTree(projectPath);
-    return files;
+    return getFileTree(projectPath);
   });
 
   // 파일 읽기
