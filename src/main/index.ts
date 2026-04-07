@@ -6,6 +6,7 @@ import { GitService } from './git-service';
 import { TerminalService } from './terminal-service';
 import { SearchService } from './search-service';
 import { PermissionService } from './permission-service';
+import { ClaudeCodeService } from './claude-code-service';
 
 let mainWindow: BrowserWindow | null = null;
 let debateEngine: DebateEngine | null = null;
@@ -46,6 +47,7 @@ function setupIPC() {
   const terminalService = new TerminalService();
   const searchService = new SearchService();
   const permissionService = new PermissionService();
+  const claudeCode = new ClaudeCodeService();
   debateEngine = new DebateEngine(aiService);
 
   // 토론 시작
@@ -226,6 +228,44 @@ function setupIPC() {
 
   ipcMain.handle('permission:check', async (_event, request) => {
     return permissionService.check(request);
+  });
+
+  // ============================================================================
+  // Claude Code CLI
+  // ============================================================================
+  ipcMain.handle('claudeCode:isAvailable', async () => {
+    return claudeCode.isAvailable();
+  });
+
+  ipcMain.handle('claudeCode:authStatus', async () => {
+    return claudeCode.getAuthStatus();
+  });
+
+  ipcMain.handle('claudeCode:execute', async (_event, { prompt, cwd, options }) => {
+    return claudeCode.execute(prompt, cwd, options);
+  });
+
+  ipcMain.handle('claudeCode:executeStream', async (_event, { id, prompt, cwd, options }) => {
+    claudeCode.executeStream(
+      id,
+      prompt,
+      cwd,
+      (data) => mainWindow?.webContents.send('claudeCode:data', { id, data }),
+      (exitCode) => mainWindow?.webContents.send('claudeCode:complete', { id, exitCode }),
+      options,
+    );
+    return { started: true };
+  });
+
+  ipcMain.handle('claudeCode:runTeam', async (_event, { tasks }) => {
+    const results = await claudeCode.runTeam(tasks, (taskId, status, output) => {
+      mainWindow?.webContents.send('claudeCode:taskUpdate', { taskId, status, output });
+    });
+    return Object.fromEntries(results);
+  });
+
+  ipcMain.handle('claudeCode:kill', async (_event, { id }) => {
+    return claudeCode.kill(id);
   });
 
   // 권한 요청 시 렌더러에 물어보기
