@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { DebateEngine } from './debate-engine';
 import { AIService } from './ai-service';
+import { GitService } from './git-service';
+import { TerminalService } from './terminal-service';
 
 let mainWindow: BrowserWindow | null = null;
 let debateEngine: DebateEngine | null = null;
@@ -38,6 +40,8 @@ function createWindow() {
 // IPC Handlers
 function setupIPC() {
   const aiService = new AIService();
+  const gitService = new GitService();
+  const terminalService = new TerminalService();
   debateEngine = new DebateEngine(aiService);
 
   // 토론 시작
@@ -117,6 +121,71 @@ function setupIPC() {
   // 프로젝트 컨텍스트 읽기 (주요 파일 내용 수집)
   ipcMain.handle('project:getContext', async (_event, { projectPath, maxFiles }) => {
     return getProjectContext(projectPath, maxFiles || 10);
+  });
+
+  // ============================================================================
+  // Git
+  // ============================================================================
+  ipcMain.handle('git:isRepo', async (_event, { projectPath }) => {
+    return gitService.isGitRepo(projectPath);
+  });
+
+  ipcMain.handle('git:status', async (_event, { projectPath }) => {
+    return gitService.status(projectPath);
+  });
+
+  ipcMain.handle('git:branches', async (_event, { projectPath }) => {
+    return gitService.branches(projectPath);
+  });
+
+  ipcMain.handle('git:currentBranch', async (_event, { projectPath }) => {
+    return gitService.currentBranch(projectPath);
+  });
+
+  ipcMain.handle('git:commit', async (_event, { projectPath, message }) => {
+    return gitService.commit(projectPath, message);
+  });
+
+  ipcMain.handle('git:diff', async (_event, { projectPath, cached }) => {
+    return gitService.diff(projectPath, cached);
+  });
+
+  ipcMain.handle('git:log', async (_event, { projectPath, count }) => {
+    return gitService.log(projectPath, count);
+  });
+
+  ipcMain.handle('git:createWorktree', async (_event, { projectPath, debateId, baseBranch }) => {
+    return gitService.createWorktree(projectPath, debateId, baseBranch);
+  });
+
+  ipcMain.handle('git:listWorktrees', async (_event, { projectPath }) => {
+    return gitService.listWorktrees(projectPath);
+  });
+
+  ipcMain.handle('git:completeDebate', async (_event, { projectPath, worktreePath, branchName, commitMessage }) => {
+    return gitService.completeDebate(projectPath, worktreePath, branchName, commitMessage);
+  });
+
+  // ============================================================================
+  // Terminal
+  // ============================================================================
+  ipcMain.handle('terminal:exec', async (_event, { command, cwd, timeout }) => {
+    return terminalService.exec(command, cwd, timeout);
+  });
+
+  ipcMain.handle('terminal:execStream', async (_event, { id, command, cwd }) => {
+    terminalService.execStream(
+      id,
+      command,
+      cwd,
+      (type, data) => mainWindow?.webContents.send('terminal:data', { id, type, data }),
+      (code) => mainWindow?.webContents.send('terminal:exit', { id, code }),
+    );
+    return { started: true };
+  });
+
+  ipcMain.handle('terminal:kill', async (_event, { id }) => {
+    return terminalService.kill(id);
   });
 }
 

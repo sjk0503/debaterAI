@@ -2,22 +2,38 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import Store from 'electron-store';
 import { AISettings } from '../shared/types';
+import { DEFAULT_CLAUDE_MODEL, DEFAULT_OPENAI_MODEL } from '../shared/models';
 
 const store = new Store<{ settings: AISettings }>({
   defaults: {
     settings: {
       claude: {
         authType: 'apiKey',
-        model: 'claude-sonnet-4-20250514',
+        model: DEFAULT_CLAUDE_MODEL,
+        temperature: 0.3,
+        maxTokens: 8192,
       },
       codex: {
         authType: 'apiKey',
-        model: 'gpt-4o',
+        model: DEFAULT_OPENAI_MODEL,
+        temperature: 0.3,
+        maxTokens: 8192,
       },
       debate: {
         mode: 'auto',
         maxRounds: 3,
         autoApply: false,
+        soloMode: 'debate',
+      },
+      git: {
+        useWorktree: true,
+        autoCommit: false,
+        commitPrefix: 'debaterai:',
+      },
+      general: {
+        theme: 'dark',
+        language: 'ko',
+        fontSize: 13,
       },
     },
   },
@@ -73,7 +89,8 @@ export class AIService {
       // 스트리밍
       const stream = this.claude.messages.stream({
         model: settings.claude.model,
-        max_tokens: 4096,
+        max_tokens: settings.claude.maxTokens || 8192,
+        temperature: settings.claude.temperature ?? 0.3,
         system: systemPrompt,
         messages,
       });
@@ -89,7 +106,8 @@ export class AIService {
     } else {
       const response = await this.claude.messages.create({
         model: settings.claude.model,
-        max_tokens: 4096,
+        max_tokens: settings.claude.maxTokens || 8192,
+        temperature: settings.claude.temperature ?? 0.3,
         system: systemPrompt,
         messages,
       });
@@ -125,7 +143,8 @@ export class AIService {
         model: settings.codex.model,
         messages: openaiMessages,
         stream: true,
-        max_tokens: 4096,
+        max_tokens: settings.codex.maxTokens || 8192,
+        temperature: settings.codex.temperature ?? 0.3,
       });
 
       let fullText = '';
@@ -139,7 +158,8 @@ export class AIService {
       const response = await this.openai.chat.completions.create({
         model: settings.codex.model,
         messages: openaiMessages,
-        max_tokens: 4096,
+        max_tokens: settings.codex.maxTokens || 8192,
+        temperature: settings.codex.temperature ?? 0.3,
       });
 
       return response.choices[0]?.message?.content || '';

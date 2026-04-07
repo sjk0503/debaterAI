@@ -64,23 +64,34 @@ export interface CodeChange {
   diff?: string;
 }
 
+export interface AIProviderSettings {
+  authType: 'oauth' | 'apiKey';
+  apiKey?: string;
+  oauthToken?: string;
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  systemPrompt?: string;
+}
+
 export interface AISettings {
-  claude: {
-    authType: 'oauth' | 'apiKey';
-    apiKey?: string;
-    oauthToken?: string;
-    model: string;
-  };
-  codex: {
-    authType: 'oauth' | 'apiKey';
-    apiKey?: string;
-    oauthToken?: string;
-    model: string;
-  };
+  claude: AIProviderSettings;
+  codex: AIProviderSettings;
   debate: {
     mode: DebateMode;
     maxRounds: number;
     autoApply: boolean;
+    soloMode: 'debate' | 'claude-only' | 'codex-only';
+  };
+  git: {
+    useWorktree: boolean;
+    autoCommit: boolean;
+    commitPrefix: string;
+  };
+  general: {
+    theme: 'dark' | 'light';
+    language: 'ko' | 'en';
+    fontSize: number;
   };
 }
 
