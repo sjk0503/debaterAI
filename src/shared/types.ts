@@ -29,6 +29,7 @@ export interface DebateSession {
   id: string;
   prompt: string;
   projectPath: string;
+  projectContext: string;
   mode: DebateMode;
   status: DebateStatus;
   messages: DebateMessage[];

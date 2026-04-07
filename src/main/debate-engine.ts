@@ -72,6 +72,7 @@ export class DebateEngine {
       id: debateId,
       prompt,
       projectPath,
+      projectContext: projectContext || '',
       mode: settings.debate.mode,
       status: 'thinking',
       messages: [],
@@ -94,8 +95,7 @@ export class DebateEngine {
     session.messages.push(userMsg);
     this.emit(userMsg);
 
-    // 프로젝트 컨텍스트 저장
-    (session as any).projectContext = projectContext || '';
+    session.projectContext = projectContext || '';
 
     // 토론 루프 시작
     this.runDebateLoop(debateId).catch((err) => {
@@ -241,7 +241,7 @@ export class DebateEngine {
    * Claude 프롬프트 생성
    */
   private buildClaudePrompt(session: DebateSession, round: number): string {
-    const ctx = (session as any).projectContext || '';
+    const ctx = session.projectContext || '';
     if (round === 1) {
       return `User request: "${session.prompt}"
 
@@ -365,10 +365,79 @@ Only output the final code files, no explanations needed.`;
   }
 
   /**
-   * 합의된 코드 파일에 적용
+   * 합의된 코드를 파싱해서 파일에 적용
    */
-  applyConsensus(debateId: string) {
-    // TODO: 코드 파싱 후 실제 파일에 쓰기
-    return { success: true };
+  async applyConsensus(debateId: string): Promise<{ success: boolean; files: string[]; errors: string[] }> {
+    const session = this.sessions.get(debateId);
+    if (!session) return { success: false, files: [], errors: ['Session not found'] };
+
+    // 마지막 Claude 메시지에서 코드 부록 추출
+    const lastClaudeMsg = [...session.messages]
+      .reverse()
+      .find((m) => m.role === 'claude' && m.content.includes('```'));
+
+    if (!lastClaudeMsg) {
+      return { success: false, files: [], errors: ['No code found in debate'] };
+    }
+
+    const codeFiles = this.parseCodeFiles(lastClaudeMsg.content, session.projectPath);
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const appliedFiles: string[] = [];
+    const errors: string[] = [];
+
+    for (const file of codeFiles) {
+      try {
+        const fullPath = path.default.isAbsolute(file.path)
+          ? file.path
+          : path.default.join(session.projectPath, file.path);
+        const dir = path.default.dirname(fullPath);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(fullPath, file.content, 'utf-8');
+        appliedFiles.push(file.path);
+      } catch (err: any) {
+        errors.push(`${file.path}: ${err.message}`);
+      }
+    }
+
+    if (appliedFiles.length > 0) {
+      this.emit({
+        id: uuidv4(),
+        role: 'system',
+        content: `💾 파일 적용 완료:\n${appliedFiles.map(f => `  ✓ ${f}`).join('\n')}${errors.length > 0 ? `\n\n⚠️ 오류:\n${errors.join('\n')}` : ''}`,
+        timestamp: Date.now(),
+      });
+    }
+
+    return { success: errors.length === 0, files: appliedFiles, errors };
+  }
+
+  /**
+   * AI 응답에서 파일별 코드 추출
+   * 지원 포맷:
+   *   --- FILE: path/to/file.ts ---
+   *   ```typescript
+   *   // code
+   *   ```
+   */
+  private parseCodeFiles(content: string, projectPath: string): { path: string; content: string }[] {
+    const files: { path: string; content: string }[] = [];
+
+    // 패턴 1: --- FILE: path --- + 코드 블록
+    const filePattern = /---\s*FILE:\s*(.+?)\s*---\s*\n```\w*\n([\s\S]*?)```/g;
+    let match;
+    while ((match = filePattern.exec(content)) !== null) {
+      files.push({ path: match[1].trim(), content: match[2].trim() });
+    }
+
+    // 패턴 2: `path/to/file.ts` 헤더 + 코드 블록 (fallback)
+    if (files.length === 0) {
+      const altPattern = /`([\w/.-]+\.[\w]+)`[:\s]*\n```\w*\n([\s\S]*?)```/g;
+      while ((match = altPattern.exec(content)) !== null) {
+        files.push({ path: match[1].trim(), content: match[2].trim() });
+      }
+    }
+
+    return files;
   }
 }
