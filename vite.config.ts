@@ -12,8 +12,27 @@ export default defineConfig({
         vite: {
           build: {
             outDir: 'dist/main',
+            ssr: true,
             rollupOptions: {
-              external: ['electron', 'electron-store'],
+              external: [
+                'electron',
+                'electron-store',
+                '@anthropic-ai/sdk',
+                'openai',
+                'uuid',
+                'fs',
+                'path',
+                'child_process',
+                'util',
+                'events',
+                'crypto',
+                'os',
+                'stream',
+                'net',
+                'tls',
+                'http',
+                'https',
+              ],
             },
           },
         },

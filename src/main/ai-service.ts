@@ -1,10 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import Store from 'electron-store';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ElectronStore = require('electron-store');
+const Store = ElectronStore.default || ElectronStore;
 import { AISettings } from '../shared/types';
 import { DEFAULT_CLAUDE_MODEL, DEFAULT_OPENAI_MODEL } from '../shared/models';
 
-const store = new Store<{ settings: AISettings }>({
+const store = new Store({
   defaults: {
     settings: {
       claude: {

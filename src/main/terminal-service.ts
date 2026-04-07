@@ -97,7 +97,7 @@ export class TerminalService extends EventEmitter {
    * 모든 프로세스 종료
    */
   killAll(): void {
-    for (const [id, proc] of this.processes) {
+    for (const [, proc] of this.processes) {
       proc.kill('SIGTERM');
     }
     this.processes.clear();

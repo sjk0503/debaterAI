@@ -1,4 +1,6 @@
-import Store from 'electron-store';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ElectronStore = require('electron-store');
+const Store = ElectronStore.default || ElectronStore;
 
 /**
  * 권한 시스템 — Claude Code 스타일
@@ -36,7 +38,7 @@ interface PermissionStore {
   sessionAllowed: string[]; // 이번 세션에서 허용된 항목 (재시작 시 초기화)
 }
 
-const store = new Store<{ permissions: PermissionStore }>({
+const store = new Store({
   defaults: {
     permissions: {
       rules: [
@@ -80,7 +82,7 @@ export class PermissionService {
 
     // 1. 규칙에서 매칭 확인
     const rules = store.get('permissions').rules;
-    const matchedRule = rules.find((r) => r.action === action && this.matchPattern(detail, r.pattern));
+    const matchedRule = rules.find((r: PermissionRule) => r.action === action && this.matchPattern(detail, r.pattern));
 
     if (matchedRule) {
       if (matchedRule.decision === 'always-allow') return true;
