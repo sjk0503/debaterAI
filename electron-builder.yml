@@ -1,17 +1,45 @@
 appId: com.debaterai.app
 productName: debaterAI
 copyright: Copyright © 2026 sjk0503
+
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
   target:
     - target: dmg
       arch:
         - arm64
         - x64
+
+dmg:
+  title: debaterAI
+  background: build/dmg-background.png
+  window:
+    width: 540
+    height: 380
+  contents:
+    - x: 150
+      y: 220
+    - x: 390
+      y: 220
+      type: link
+      path: /Applications
+
 directories:
   output: release
   buildResources: build
+
 files:
   - dist/**/*
   - package.json
+  - "!node_modules"
+  - "!src"
+  - "!docs"
+  - "!*.md"
+
+npmRebuild: false
+asar: true
