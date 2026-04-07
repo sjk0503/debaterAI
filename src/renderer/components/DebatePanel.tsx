@@ -7,128 +7,204 @@ interface Props {
   status: string;
   projectPath: string;
   onProjectPathChange: (path: string) => void;
+  onOpenDirectory: () => void;
 }
 
-export function DebatePanel({ messages, status, projectPath, onProjectPathChange }: Props) {
+export function DebatePanel({ messages, status, projectPath, onProjectPathChange, onOpenDirectory }: Props) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const isActive = status !== 'idle' && status !== 'done' && status !== 'error';
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const handleSubmit = async () => {
-    if (!input.trim() || !projectPath.trim()) return;
-    if (status !== 'idle' && status !== 'done' && status !== 'error') return;
-
+    if (!input.trim() || !projectPath.trim() || isActive) return;
     await window.api.startDebate(input.trim(), projectPath.trim());
     setInput('');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       handleSubmit();
     }
   };
 
-  const roleConfig = {
-    user: { label: '👤 You', color: 'border-blue-500', bg: 'bg-blue-500/10' },
-    claude: { label: '🟣 Claude', color: 'border-purple-500', bg: 'bg-purple-500/10' },
-    codex: { label: '🟢 Codex', color: 'border-green-500', bg: 'bg-green-500/10' },
-    system: { label: '⚙️ System', color: 'border-gray-500', bg: 'bg-gray-500/10' },
+  const roleMeta: Record<string, { label: string; color: string }> = {
+    user:   { label: 'You',    color: 'var(--user)' },
+    claude: { label: 'Claude', color: 'var(--claude)' },
+    codex:  { label: 'Codex',  color: 'var(--codex)' },
+    system: { label: '',       color: 'transparent' },
+  };
+
+  const agreementLabel: Record<string, string> = {
+    agree:    'agreed',
+    partial:  'partial',
+    disagree: 'rejected',
   };
 
   return (
-    <div className="flex flex-col h-full no-drag">
+    <div className="flex flex-col h-full no-drag" style={{ background: 'var(--bg-0)' }}>
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500">
-            <div className="text-6xl mb-4">🤖⚔️🤖</div>
-            <h2 className="text-xl font-bold mb-2">debaterAI</h2>
-            <p className="text-sm text-center max-w-md">
-              Claude와 Codex가 토론하며 최적의 코드를 만듭니다.
-              <br />
-              프로젝트 경로를 설정하고 명령을 입력하세요.
+          <div className="flex flex-col items-center justify-center h-full" style={{ color: 'var(--text-3)' }}>
+            <div className="mb-6 text-4xl font-bold tracking-tight" style={{ color: 'var(--text-2)' }}>
+              debaterAI
+            </div>
+            <p className="text-xs text-center max-w-xs leading-relaxed" style={{ color: 'var(--text-3)' }}>
+              Two AI agents debate every decision before writing a single line of code.
             </p>
           </div>
         )}
 
         {messages.map((msg) => {
-          const cfg = roleConfig[msg.role] || roleConfig.system;
+          const meta = roleMeta[msg.role] || roleMeta.system;
+
+          // System messages — 심플한 구분선
+          if (msg.role === 'system') {
+            return (
+              <div key={msg.id} className="flex items-center gap-3 py-1">
+                <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
+                <span className="text-xs shrink-0" style={{ color: 'var(--text-3)' }}>
+                  {msg.content}
+                </span>
+                <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
+              </div>
+            );
+          }
+
           return (
-            <div
-              key={msg.id}
-              className={`rounded-lg border-l-4 ${cfg.color} ${cfg.bg} p-3`}
-            >
+            <div key={msg.id} className="group">
+              {/* Header */}
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-bold text-gray-300">{cfg.label}</span>
+                <span
+                  className="text-xs font-semibold"
+                  style={{ color: meta.color }}
+                >
+                  {meta.label}
+                </span>
                 {msg.round && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">
-                    Round {msg.round}
+                  <span className="text-xs" style={{ color: 'var(--text-3)' }}>
+                    round {msg.round}
                   </span>
                 )}
                 {msg.agreement && (
                   <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded ${
-                      msg.agreement === 'agree'
-                        ? 'bg-green-900 text-green-300'
+                    className="text-xs px-1.5 py-0.5 rounded"
+                    style={{
+                      background: msg.agreement === 'agree'
+                        ? 'rgba(16,185,129,0.15)'
                         : msg.agreement === 'partial'
-                          ? 'bg-yellow-900 text-yellow-300'
-                          : 'bg-red-900 text-red-300'
-                    }`}
+                          ? 'rgba(245,158,11,0.15)'
+                          : 'rgba(239,68,68,0.15)',
+                      color: msg.agreement === 'agree'
+                        ? '#10b981'
+                        : msg.agreement === 'partial'
+                          ? '#f59e0b'
+                          : '#ef4444',
+                    }}
                   >
-                    {msg.agreement === 'agree' ? '✅ 합의' : msg.agreement === 'partial' ? '⚡ 부분합의' : '❌ 반대'}
+                    {agreementLabel[msg.agreement]}
                   </span>
                 )}
               </div>
-              <MarkdownMessage
-                content={msg.content}
-                isStreaming={
-                  (status === 'debating' || status === 'coding') &&
-                  msg === messages[messages.length - 1] &&
-                  msg.role !== 'system'
-                }
-              />
+
+              {/* Content */}
+              <div
+                className="rounded-md px-3 py-2.5 text-xs"
+                style={{
+                  background: 'var(--bg-2)',
+                  border: '1px solid var(--border)',
+                  lineHeight: 1.6,
+                }}
+              >
+                <MarkdownMessage
+                  content={msg.content}
+                  isStreaming={
+                    isActive &&
+                    msg === messages[messages.length - 1]
+                  }
+                />
+              </div>
             </div>
           );
         })}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <div className="border-t border-[#383838] p-4 bg-[#242424]">
-        {/* Project Path */}
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-xs text-gray-500">📁</span>
+      {/* Input */}
+      <div
+        className="flex-shrink-0 px-4 py-3"
+        style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-1)' }}
+      >
+        {/* Project path row */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs" style={{ color: 'var(--text-3)' }}>Project</span>
           <input
             type="text"
             value={projectPath}
             onChange={(e) => onProjectPathChange(e.target.value)}
-            placeholder="프로젝트 경로 (예: /Users/you/my-project)"
-            className="flex-1 bg-[#1a1a1a] border border-[#383838] rounded px-3 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500"
+            placeholder="/path/to/your/project"
+            className="flex-1 text-xs rounded px-2 py-1 outline-none transition"
+            style={{
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-2)',
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
           />
+          <button
+            onClick={onOpenDirectory}
+            className="text-xs px-2 py-1 rounded transition"
+            style={{ background: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+          >
+            Browse
+          </button>
         </div>
 
-        {/* Message Input */}
-        <div className="flex gap-2">
+        {/* Input row */}
+        <div className="flex gap-2 items-end">
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="명령을 입력하세요... (예: 로그인 기능 만들어줘)"
+            placeholder={isActive ? 'Debating...' : 'Describe what to build... (⌘ Enter to start)'}
             rows={2}
-            className="flex-1 bg-[#1a1a1a] border border-[#383838] rounded-lg px-4 py-3 text-sm text-white resize-none focus:outline-none focus:border-purple-500 placeholder-gray-600"
+            disabled={isActive}
+            className="flex-1 text-xs rounded px-3 py-2 resize-none outline-none transition"
+            style={{
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-1)',
+            }}
+            onFocus={(e) => !isActive && (e.currentTarget.style.borderColor = 'var(--accent)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
           />
           <button
             onClick={handleSubmit}
-            disabled={!input.trim() || !projectPath.trim() || (status !== 'idle' && status !== 'done' && status !== 'error')}
-            className="px-6 bg-gradient-to-r from-purple-600 to-green-600 rounded-lg font-bold text-sm hover:from-purple-500 hover:to-green-500 disabled:opacity-30 disabled:cursor-not-allowed transition self-end h-10"
+            disabled={!input.trim() || !projectPath.trim() || isActive}
+            className="text-xs px-4 py-2 rounded font-medium transition h-10"
+            style={{
+              background: isActive || !input.trim() || !projectPath.trim()
+                ? 'var(--bg-3)'
+                : 'var(--accent)',
+              color: isActive || !input.trim() || !projectPath.trim()
+                ? 'var(--text-3)'
+                : 'white',
+              border: 'none',
+              cursor: isActive ? 'not-allowed' : 'pointer',
+              minWidth: 96,
+            }}
           >
-            ⚔️ 토론 시작
+            {isActive ? 'Debating...' : 'Start Debate'}
           </button>
         </div>
       </div>

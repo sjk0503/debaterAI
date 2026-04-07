@@ -28,12 +28,12 @@ export function SettingsModal({ onClose }: Props) {
   if (!settings) return null;
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
-    { id: 'claude', label: 'Claude', icon: '🟣' },
-    { id: 'codex', label: 'Codex/GPT', icon: '🟢' },
-    { id: 'debate', label: 'Debate', icon: '⚔️' },
-    { id: 'git', label: 'Git', icon: '📦' },
-    { id: 'permissions', label: 'Permissions', icon: '🔒' },
-    { id: 'general', label: 'General', icon: '⚙️' },
+    { id: 'claude', label: 'Claude', icon: '' },
+    { id: 'codex', label: 'Codex', icon: '' },
+    { id: 'debate', label: 'Debate', icon: '' },
+    { id: 'git', label: 'Git', icon: '' },
+    { id: 'permissions', label: 'Permissions', icon: '' },
+    { id: 'general', label: 'General', icon: '' },
   ];
 
   return (
