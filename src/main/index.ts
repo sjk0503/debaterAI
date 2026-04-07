@@ -4,6 +4,8 @@ import { DebateEngine } from './debate-engine';
 import { AIService } from './ai-service';
 import { GitService } from './git-service';
 import { TerminalService } from './terminal-service';
+import { SearchService } from './search-service';
+import { PermissionService } from './permission-service';
 
 let mainWindow: BrowserWindow | null = null;
 let debateEngine: DebateEngine | null = null;
@@ -42,6 +44,8 @@ function setupIPC() {
   const aiService = new AIService();
   const gitService = new GitService();
   const terminalService = new TerminalService();
+  const searchService = new SearchService();
+  const permissionService = new PermissionService();
   debateEngine = new DebateEngine(aiService);
 
   // 토론 시작
@@ -186,6 +190,52 @@ function setupIPC() {
 
   ipcMain.handle('terminal:kill', async (_event, { id }) => {
     return terminalService.kill(id);
+  });
+
+  // ============================================================================
+  // Search
+  // ============================================================================
+  ipcMain.handle('search:grep', async (_event, { projectPath, query, options }) => {
+    return searchService.grep(projectPath, query, options);
+  });
+
+  ipcMain.handle('search:files', async (_event, { projectPath, query, options }) => {
+    return searchService.findFiles(projectPath, query, options);
+  });
+
+  ipcMain.handle('search:stats', async (_event, { projectPath }) => {
+    return searchService.getProjectStats(projectPath);
+  });
+
+  // ============================================================================
+  // Permissions
+  // ============================================================================
+  ipcMain.handle('permission:getRules', async () => {
+    return permissionService.getRules();
+  });
+
+  ipcMain.handle('permission:addRule', async (_event, rule) => {
+    permissionService.addRule(rule);
+    return { success: true };
+  });
+
+  ipcMain.handle('permission:removeRule', async (_event, { index }) => {
+    permissionService.removeRule(index);
+    return { success: true };
+  });
+
+  ipcMain.handle('permission:check', async (_event, request) => {
+    return permissionService.check(request);
+  });
+
+  // 권한 요청 시 렌더러에 물어보기
+  permissionService.onPermissionRequest(async (request) => {
+    return new Promise((resolve) => {
+      mainWindow?.webContents.send('permission:request', request);
+      ipcMain.once('permission:response', (_event, decision) => {
+        resolve(decision);
+      });
+    });
   });
 }
 

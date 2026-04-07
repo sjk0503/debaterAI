@@ -20,14 +20,14 @@ export interface ModelInfo {
 export const CLAUDE_MODELS: ModelInfo[] = [
   {
     id: 'claude-opus-4-20250514',
-    name: 'Claude Opus 4',
+    name: 'Claude Opus 4.6',
     provider: 'anthropic',
     tier: 'flagship',
-    contextWindow: 200000,
+    contextWindow: 1000000,
     maxOutput: 32000,
     supportsVision: true,
     supportsStreaming: true,
-    description: '최고 성능. 복잡한 아키텍처 설계, 대규모 코드베이스 분석에 최적.',
+    description: '최고 성능. 1M 컨텍스트. 복잡한 아키텍처 설계, 대규모 코드베이스 분석에 최적.',
   },
   {
     id: 'claude-sonnet-4-20250514',
