@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { DebateMessage } from '../../shared/types';
+import { MarkdownMessage } from './MarkdownMessage';
 
 interface Props {
   messages: DebateMessage[];
@@ -83,14 +84,14 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
                   </span>
                 )}
               </div>
-              <div className="debate-message text-sm text-gray-200 whitespace-pre-wrap break-words">
-                {msg.content}
-                {(status === 'debating' || status === 'coding') &&
+              <MarkdownMessage
+                content={msg.content}
+                isStreaming={
+                  (status === 'debating' || status === 'coding') &&
                   msg === messages[messages.length - 1] &&
-                  msg.role !== 'system' && (
-                    <span className="typing-cursor" />
-                  )}
-              </div>
+                  msg.role !== 'system'
+                }
+              />
             </div>
           );
         })}

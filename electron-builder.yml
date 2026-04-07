@@ -1,0 +1,17 @@
+appId: com.debaterai.app
+productName: debaterAI
+copyright: Copyright © 2026 sjk0503
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
