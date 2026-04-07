@@ -64,7 +64,7 @@ export class DebateEngine {
   /**
    * 토론 시작
    */
-  async startDebate(prompt: string, projectPath: string): Promise<string> {
+  async startDebate(prompt: string, projectPath: string, projectContext?: string): Promise<string> {
     const debateId = uuidv4();
     const settings = this.ai.getSettings();
 
@@ -93,6 +93,9 @@ export class DebateEngine {
     };
     session.messages.push(userMsg);
     this.emit(userMsg);
+
+    // 프로젝트 컨텍스트 저장
+    (session as any).projectContext = projectContext || '';
 
     // 토론 루프 시작
     this.runDebateLoop(debateId).catch((err) => {
@@ -238,12 +241,13 @@ export class DebateEngine {
    * Claude 프롬프트 생성
    */
   private buildClaudePrompt(session: DebateSession, round: number): string {
+    const ctx = (session as any).projectContext || '';
     if (round === 1) {
       return `User request: "${session.prompt}"
 
 Project path: ${session.projectPath}
 
-Please propose an implementation plan with code. This will be reviewed by another AI (Codex) for feedback.`;
+${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please propose an implementation plan with code. This will be reviewed by another AI (Codex) for feedback. Consider the existing project structure and code style.`;
     }
 
     const lastRound = session.rounds[session.rounds.length - 1];

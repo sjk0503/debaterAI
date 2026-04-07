@@ -28,4 +28,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('project:files', { projectPath }),
   readFile: (filePath: string) =>
     ipcRenderer.invoke('project:readFile', { filePath }),
+  writeFile: (filePath: string, content: string) =>
+    ipcRenderer.invoke('project:writeFile', { filePath, content }),
+  getProjectContext: (projectPath: string, maxFiles?: number) =>
+    ipcRenderer.invoke('project:getContext', { projectPath, maxFiles }),
+
+  // Dialog
+  openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
 });

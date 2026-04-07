@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { DebateEngine } from './debate-engine';
 import { AIService } from './ai-service';
@@ -52,7 +52,15 @@ function setupIPC() {
       mainWindow?.webContents.send('debate:status', status);
     });
 
-    return debateEngine.startDebate(prompt, projectPath);
+    // 프로젝트 컨텍스트 수집 → AI에게 전달
+    let projectContext = '';
+    try {
+      projectContext = await getProjectContext(projectPath, 10);
+    } catch (err) {
+      console.warn('Failed to collect project context:', err);
+    }
+
+    return debateEngine.startDebate(prompt, projectPath, projectContext);
   });
 
   // 토론 중 사용자 개입
@@ -85,6 +93,30 @@ function setupIPC() {
   ipcMain.handle('project:readFile', async (_event, { filePath }) => {
     const fs = await import('fs/promises');
     return fs.readFile(filePath, 'utf-8');
+  });
+
+  // 파일 쓰기
+  ipcMain.handle('project:writeFile', async (_event, { filePath, content }) => {
+    const fs = await import('fs/promises');
+    const dir = path.dirname(filePath);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(filePath, content, 'utf-8');
+    return { success: true };
+  });
+
+  // 폴더 선택 다이얼로그
+  ipcMain.handle('dialog:openDirectory', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openDirectory'],
+      title: '프로젝트 폴더 선택',
+    });
+    if (result.canceled) return null;
+    return result.filePaths[0];
+  });
+
+  // 프로젝트 컨텍스트 읽기 (주요 파일 내용 수집)
+  ipcMain.handle('project:getContext', async (_event, { projectPath, maxFiles }) => {
+    return getProjectContext(projectPath, maxFiles || 10);
   });
 }
 
@@ -119,6 +151,71 @@ async function getFileTree(dir: string, prefix = ''): Promise<any[]> {
     if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
+}
+
+/**
+ * 프로젝트 컨텍스트 수집 — AI에게 프로젝트 구조와 주요 파일을 전달
+ */
+async function getProjectContext(projectPath: string, maxFiles: number): Promise<string> {
+  const fs = await import('fs/promises');
+  let context = `## Project: ${projectPath}\n\n`;
+
+  // package.json
+  try {
+    const pkg = await fs.readFile(path.join(projectPath, 'package.json'), 'utf-8');
+    context += `### package.json\n\`\`\`json\n${pkg}\n\`\`\`\n\n`;
+  } catch {}
+
+  // tsconfig.json
+  try {
+    const tsconfig = await fs.readFile(path.join(projectPath, 'tsconfig.json'), 'utf-8');
+    context += `### tsconfig.json\n\`\`\`json\n${tsconfig}\n\`\`\`\n\n`;
+  } catch {}
+
+  // 파일 트리 (구조 파악용)
+  const tree = await getFileTree(projectPath);
+  context += `### File Structure\n\`\`\`\n${formatFileTree(tree)}\n\`\`\`\n\n`;
+
+  // 주요 파일 내용 수집 (소스 파일 우선)
+  const sourceFiles = collectSourceFiles(tree);
+  const filesToRead = sourceFiles.slice(0, maxFiles);
+
+  for (const filePath of filesToRead) {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      if (content.length > 5000) continue; // 너무 큰 파일 스킵
+      const ext = path.extname(filePath).slice(1) || 'text';
+      const relPath = path.relative(projectPath, filePath);
+      context += `### ${relPath}\n\`\`\`${ext}\n${content}\n\`\`\`\n\n`;
+    } catch {}
+  }
+
+  return context;
+}
+
+function formatFileTree(items: any[], prefix = ''): string {
+  let result = '';
+  for (const item of items) {
+    result += `${prefix}${item.type === 'directory' ? '📁' : '📄'} ${item.name}\n`;
+    if (item.children) {
+      result += formatFileTree(item.children, prefix + '  ');
+    }
+  }
+  return result;
+}
+
+function collectSourceFiles(items: any[]): string[] {
+  const files: string[] = [];
+  const sourceExts = ['.ts', '.tsx', '.js', '.jsx', '.py', '.rs', '.go', '.vue', '.svelte'];
+  for (const item of items) {
+    if (item.type === 'file' && sourceExts.some(ext => item.name.endsWith(ext))) {
+      files.push(item.path);
+    }
+    if (item.children) {
+      files.push(...collectSourceFiles(item.children));
+    }
+  }
+  return files;
 }
 
 app.whenReady().then(() => {

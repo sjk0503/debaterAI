@@ -17,6 +17,9 @@ declare global {
       saveSettings: (settings: any) => Promise<any>;
       getFiles: (projectPath: string) => Promise<any>;
       readFile: (filePath: string) => Promise<string>;
+      writeFile: (filePath: string, content: string) => Promise<any>;
+      getProjectContext: (projectPath: string, maxFiles?: number) => Promise<string>;
+      openDirectory: () => Promise<string | null>;
     };
   }
 }
