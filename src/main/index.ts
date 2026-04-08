@@ -7,10 +7,13 @@ import { TerminalService } from './terminal-service';
 import { SearchService } from './search-service';
 import { PermissionService } from './permission-service';
 import { ClaudeCodeService } from './claude-code-service';
+import { CodexCliService } from './codex-cli-service';
 import { AppReadiness, ReadinessAction } from '../shared/types';
+import { AgentRuntime } from './agent-runtime';
 
 let mainWindow: BrowserWindow | null = null;
 let debateEngine: DebateEngine | null = null;
+let agentRuntime: AgentRuntime | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -31,7 +34,6 @@ function createWindow() {
 
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
@@ -44,12 +46,38 @@ function createWindow() {
 // IPC Handlers
 function setupIPC() {
   const claudeCode = new ClaudeCodeService();
-  const aiService = new AIService(claudeCode);
+  const codexCli = new CodexCliService();
+  const aiService = new AIService(claudeCode, codexCli);
   const gitService = new GitService();
   const terminalService = new TerminalService();
   const searchService = new SearchService();
   const permissionService = new PermissionService();
   debateEngine = new DebateEngine(aiService);
+  agentRuntime = new AgentRuntime();
+
+  // ============================================================================
+  // Agent Runtime — spawn full CLI agents
+  // ============================================================================
+  ipcMain.handle('agent:spawn', async (_event, opts) => {
+    if (!agentRuntime || !mainWindow) return { error: 'Not initialized' };
+
+    const result = await agentRuntime.spawn({
+      ...opts,
+      onEvent: (event) => {
+        mainWindow?.webContents.send('agent:event', event);
+      },
+    });
+    return result;
+  });
+
+  ipcMain.handle('agent:kill', async (_event, { agentId }) => {
+    return agentRuntime?.kill(agentId) ?? false;
+  });
+
+  ipcMain.handle('agent:killAll', async () => {
+    agentRuntime?.killAll();
+    return { success: true };
+  });
 
   // Readiness check — single aggregated IPC
   ipcMain.handle('app:getReadiness', async (_event, { projectPath }) => {
@@ -92,12 +120,12 @@ function setupIPC() {
   });
 
   // 토론 시작
-  ipcMain.handle('debate:start', async (_event, { prompt, projectPath }) => {
+  ipcMain.handle('debate:start', async (_event, { prompt, projectPath, mode }) => {
     if (!debateEngine || !mainWindow) return;
 
-    // Validate first
-    const settings = aiService.getSettings();
-    const validation = debateEngine.validateStart(settings.debate.preferredMode);
+    // Use provided mode or fall back to preferred mode
+    const resolvedMode = mode || aiService.getSettings().debate.preferredMode;
+    const validation = debateEngine.validateStart(resolvedMode);
     if (!validation.valid) {
       return { error: validation.error };
     }
@@ -121,7 +149,7 @@ function setupIPC() {
       console.warn('Failed to collect project context:', err);
     }
 
-    return debateEngine.startDebate(prompt, projectPath, projectContext);
+    return debateEngine.startDebate(prompt, projectPath, projectContext, resolvedMode);
   });
 
   // 토론 중 사용자 개입
@@ -315,6 +343,17 @@ function setupIPC() {
 
   ipcMain.handle('claudeCode:kill', async (_event, { id }) => {
     return claudeCode.kill(id);
+  });
+
+  // ============================================================================
+  // Codex CLI
+  // ============================================================================
+  ipcMain.handle('codexCli:isAvailable', async () => {
+    return codexCli.isAvailable();
+  });
+
+  ipcMain.handle('codexCli:authInfo', async () => {
+    return codexCli.getAuthInfo();
   });
 
   // 권한 요청 시 렌더러에 물어보기

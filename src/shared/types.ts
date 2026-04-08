@@ -9,6 +9,7 @@ export type DebateStatus = 'idle' | 'thinking' | 'debating' | 'consensus' | 'cod
 export type Agreement = 'agree' | 'partial' | 'disagree';
 export type MessageRole = 'user' | 'claude' | 'codex' | 'system';
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
+export type ClaudeEffort = 'low' | 'medium' | 'high' | 'max';
 
 export interface DebateMessage {
   id: string;
@@ -18,6 +19,9 @@ export interface DebateMessage {
   round?: number;
   agreement?: Agreement;
   codeBlocks?: CodeBlock[];
+  agentEvents?: any[];       // AgentEvent[] from agent-events.ts
+  filesChanged?: string[];
+  toolsUsed?: string[];
 }
 
 export interface CodeBlock {
@@ -77,6 +81,7 @@ export interface ClaudeSettings {
   model: string;
   temperature: number;
   maxTokens: number;
+  effort?: ClaudeEffort;
   systemPrompt?: string;
 }
 

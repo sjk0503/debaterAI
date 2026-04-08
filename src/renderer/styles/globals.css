@@ -38,6 +38,13 @@ input, textarea, button, select, .no-drag {
   -webkit-app-region: no-drag;
 }
 
+/* Allow text selection in message content */
+.message-content, .message-content * {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }

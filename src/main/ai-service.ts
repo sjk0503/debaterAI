@@ -126,6 +126,7 @@ export class AIService {
         this.claudeCode,
         settings.claude.model,
         this.projectPath || process.cwd(),
+        settings.claude.effort,
       );
     }
 

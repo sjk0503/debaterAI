@@ -86,6 +86,7 @@ export class ClaudeCliAdapter implements TransportAdapter {
     private cli: ClaudeCodeService,
     private model: string,
     private cwd: string,
+    private effort?: string,
   ) {}
 
   async ask(
@@ -114,12 +115,19 @@ export class ClaudeCliAdapter implements TransportAdapter {
     return new Promise((resolve, reject) => {
       const args = [
         '--print',
-        '--bare',
         '--output-format', outputFormat,
         '--system-prompt', systemPrompt,
         '--model', this.model,
-        '--max-turns', '1',
+        '--max-turns', '20',
       ];
+
+      if (outputFormat === 'stream-json') {
+        args.push('--verbose');
+      }
+
+      if (this.effort) {
+        args.push('--effort', this.effort);
+      }
 
       // Pass prompt as the CLI argument for short prompts,
       // pipe via stdin for long ones to avoid OS ARG_MAX
@@ -128,7 +136,7 @@ export class ClaudeCliAdapter implements TransportAdapter {
         args.push(prompt);
       }
 
-      const proc = spawn('claude', args, {
+      const proc = spawn(this.cli.resolveBinary(), args, {
         cwd: this.cwd,
         env: { ...process.env, FORCE_COLOR: '0' },
         timeout: 180000,
@@ -317,7 +325,7 @@ export class OpenAIApiAdapter implements TransportAdapter {
 
 export class CodexCliAdapter implements TransportAdapter {
   constructor(
-    _cli: CodexCliService, // kept for future use (e.g. auth checks)
+    private cli: CodexCliService,
     private model: string,
     private cwd: string,
   ) {}
@@ -344,7 +352,6 @@ export class CodexCliAdapter implements TransportAdapter {
         '--json',
         '--ephemeral',
         '--sandbox', 'read-only',
-        '-a', 'never',
         '--model', this.model,
         '-C', this.cwd,
       ];
@@ -355,7 +362,7 @@ export class CodexCliAdapter implements TransportAdapter {
         args.push(prompt);
       }
 
-      const proc = spawn('codex', args, {
+      const proc = spawn(this.cli.getBinaryPath(), args, {
         env: { ...process.env, FORCE_COLOR: '0' },
         timeout: 180000,
         stdio: useStdin ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],

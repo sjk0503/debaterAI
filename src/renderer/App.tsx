@@ -5,14 +5,20 @@ import { CodeView } from './components/CodeView';
 import { SettingsModal } from './components/SettingsModal';
 import { PermissionModal } from './components/PermissionModal';
 import { DiffView } from './components/DiffView';
-import { DebateMessage, AppReadiness } from '../shared/types';
+import { DebateMessage, DebateMode, AppReadiness } from '../shared/types';
 
 declare global {
   interface Window {
     api: {
+      // Agent Runtime
+      spawnAgent: (opts: any) => Promise<any>;
+      killAgent: (agentId: string) => Promise<boolean>;
+      killAllAgents: () => Promise<any>;
+      onAgentEvent: (cb: (event: any) => void) => () => void;
+      // Readiness
       getReadiness: (projectPath: string) => Promise<AppReadiness>;
       validateStart: () => Promise<{ valid: boolean; error?: string }>;
-      startDebate: (prompt: string, projectPath: string) => Promise<string>;
+      startDebate: (prompt: string, projectPath: string, mode?: string) => Promise<string>;
       intervene: (decision: string) => Promise<any>;
       applyCode: (debateId: string) => Promise<any>;
       onDebateMessage: (cb: (msg: DebateMessage) => void) => () => void;
@@ -49,7 +55,9 @@ export default function App() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
   const [diffContent, setDiffContent] = useState('');
+  const [selectedMode, setSelectedMode] = useState<DebateMode>('debate');
   const [permissionReq, setPermissionReq] = useState<any>(null);
+  const [settingsVersion, setSettingsVersion] = useState(0);
 
   useEffect(() => {
     const cleanupMsg = window.api?.onDebateMessage((msg) => {
@@ -218,9 +226,12 @@ export default function App() {
             messages={messages}
             status={status}
             projectPath={projectPath}
+            selectedMode={selectedMode}
+            settingsVersion={settingsVersion}
             onProjectPathChange={setProjectPath}
             onOpenDirectory={handleOpenDirectory}
             onOpenSettings={(tab) => setShowSettings(true)}
+            onModeChange={setSelectedMode}
           />
         </div>
 
@@ -248,7 +259,7 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsModal onClose={() => { setShowSettings(false); setSettingsVersion(v => v + 1); }} />}
       {permissionReq && (
         <PermissionModal
           action={permissionReq.action}

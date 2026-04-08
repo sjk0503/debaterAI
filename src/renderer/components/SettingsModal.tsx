@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { AISettings, ClaudeSettings, OpenAISettings, ReasoningEffort } from '../../shared/types';
+import { AISettings, ClaudeSettings, OpenAISettings, ClaudeEffort, ReasoningEffort } from '../../shared/types';
 import { CLAUDE_MODELS, OPENAI_MODELS, ModelInfo } from '../../shared/models';
 
 interface Props {
   onClose: () => void;
 }
 
-type Tab = 'claude' | 'codex' | 'debate' | 'git' | 'permissions' | 'general';
+type Tab = 'claude' | 'codex' | 'debate' | 'git';
 
 export function SettingsModal({ onClose }: Props) {
   const [settings, setSettings] = useState<AISettings | null>(null);
@@ -30,10 +30,8 @@ export function SettingsModal({ onClose }: Props) {
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: 'claude', label: 'Claude', icon: '' },
     { id: 'codex', label: 'Codex', icon: '' },
-    { id: 'debate', label: 'Debate', icon: '' },
+    { id: 'debate', label: '토론 설정', icon: '' },
     { id: 'git', label: 'Git', icon: '' },
-    { id: 'permissions', label: 'Permissions', icon: '' },
-    { id: 'general', label: 'General', icon: '' },
   ];
 
   return (
@@ -44,7 +42,7 @@ export function SettingsModal({ onClose }: Props) {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#383838]">
-          <h2 className="text-lg font-bold">Settings</h2>
+          <h2 className="text-lg font-bold">설정</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-white">✕</button>
         </div>
 
@@ -82,22 +80,22 @@ export function SettingsModal({ onClose }: Props) {
 
             {tab === 'debate' && (
               <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-300">Debate Settings</h3>
+                <h3 className="text-sm font-bold text-gray-300">토론 설정</h3>
 
-                <Field label="Preferred Mode">
+                <Field label="기본 모드">
                   <select
                     value={settings.debate.preferredMode}
                     onChange={(e) => setSettings({ ...settings, debate: { ...settings.debate, preferredMode: e.target.value as any } })}
                     className="input-field"
                   >
-                    <option value="debate">Debate — Claude vs Codex</option>
-                    <option value="claude-only">Claude Only</option>
-                    <option value="codex-only">Codex Only</option>
+                    <option value="debate">토론 — Claude vs Codex가 토론 후 코드 생성</option>
+                    <option value="claude-only">Claude 단독 — Claude가 바로 코드 생성</option>
+                    <option value="codex-only">Codex 단독 — GPT가 바로 코드 생성</option>
                   </select>
-                  <p className="text-[10px] text-gray-600 mt-1">Actual available modes depend on provider readiness</p>
+                  <p className="text-[10px] text-gray-600 mt-1">메인 화면에서도 변경 가능합니다</p>
                 </Field>
 
-                <Field label="Max Rounds">
+                <Field label="최대 라운드">
                   <div className="flex items-center gap-3">
                     <input
                       type="range"
@@ -109,10 +107,10 @@ export function SettingsModal({ onClose }: Props) {
                     />
                     <span className="text-sm text-gray-300 w-6 text-center">{settings.debate.maxRounds}</span>
                   </div>
-                  <p className="text-[10px] text-gray-600 mt-1">After max rounds without consensus, Claude's proposal wins</p>
+                  <p className="text-[10px] text-gray-600 mt-1">합의 안 되면 이 횟수 후 Claude 의견 우선 적용</p>
                 </Field>
 
-                <Field label="Auto Apply">
+                <Field label="자동 적용">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -120,7 +118,7 @@ export function SettingsModal({ onClose }: Props) {
                       onChange={(e) => setSettings({ ...settings, debate: { ...settings.debate, autoApply: e.target.checked } })}
                       className="rounded"
                     />
-                    <span className="text-xs text-gray-400">Auto-apply code after consensus</span>
+                    <span className="text-xs text-gray-400">합의 후 자동으로 코드 적용</span>
                   </label>
                 </Field>
               </div>
@@ -128,9 +126,9 @@ export function SettingsModal({ onClose }: Props) {
 
             {tab === 'git' && (
               <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-300">Git Settings</h3>
+                <h3 className="text-sm font-bold text-gray-300">Git 설정</h3>
 
-                <Field label="Worktree Isolation">
+                <Field label="워크트리 격리">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -138,11 +136,11 @@ export function SettingsModal({ onClose }: Props) {
                       onChange={(e) => setSettings({ ...settings, git: { ...settings.git, useWorktree: e.target.checked } })}
                       className="rounded"
                     />
-                    <span className="text-xs text-gray-400">Isolate each debate in a separate git worktree</span>
+                    <span className="text-xs text-gray-400">토론마다 별도 Git 워크트리에서 작업</span>
                   </label>
                 </Field>
 
-                <Field label="Auto Commit">
+                <Field label="자동 커밋">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -150,11 +148,11 @@ export function SettingsModal({ onClose }: Props) {
                       onChange={(e) => setSettings({ ...settings, git: { ...settings.git, autoCommit: e.target.checked } })}
                       className="rounded"
                     />
-                    <span className="text-xs text-gray-400">Auto-commit when code is applied</span>
+                    <span className="text-xs text-gray-400">코드 적용 시 자동 커밋</span>
                   </label>
                 </Field>
 
-                <Field label="Commit Prefix">
+                <Field label="커밋 접두사">
                   <input
                     type="text"
                     value={settings.git.commitPrefix}
@@ -166,76 +164,20 @@ export function SettingsModal({ onClose }: Props) {
               </div>
             )}
 
-            {tab === 'permissions' && (
-              <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-300">Permission Rules</h3>
-                <p className="text-xs text-gray-500">Control what actions AI agents can perform.</p>
-                <div className="space-y-2">
-                  {['File read: always allow', 'src/ write: always allow', 'npm run *: always allow', 'rm *: ask every time', 'sudo *: always deny', 'git push: ask every time'].map((rule, i) => (
-                    <div key={i} className="flex items-center justify-between bg-[#1a1a1a] rounded px-3 py-2 border border-[#333]">
-                      <span className="text-xs text-gray-400">{rule}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-[10px] text-gray-600">* Detailed rule editing coming soon</p>
-              </div>
-            )}
-
-            {tab === 'general' && (
-              <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-300">General</h3>
-
-                <Field label="Language">
-                  <select
-                    value={settings.general.language}
-                    onChange={(e) => setSettings({ ...settings, general: { ...settings.general, language: e.target.value as any } })}
-                    className="input-field"
-                  >
-                    <option value="ko">한국어</option>
-                    <option value="en">English</option>
-                  </select>
-                </Field>
-
-                <Field label="Font Size">
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="range"
-                      min={10}
-                      max={18}
-                      value={settings.general.fontSize}
-                      onChange={(e) => setSettings({ ...settings, general: { ...settings.general, fontSize: parseInt(e.target.value) } })}
-                      className="flex-1"
-                    />
-                    <span className="text-sm text-gray-300 w-8 text-center">{settings.general.fontSize}px</span>
-                  </div>
-                </Field>
-
-                <Field label="Theme">
-                  <select
-                    value={settings.general.theme}
-                    onChange={(e) => setSettings({ ...settings, general: { ...settings.general, theme: e.target.value as any } })}
-                    className="input-field"
-                  >
-                    <option value="dark">Dark</option>
-                    <option value="light">Light (Coming Soon)</option>
-                  </select>
-                </Field>
-              </div>
-            )}
           </div>
         </div>
 
         {/* Footer */}
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-[#383838]">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-400 hover:text-white rounded hover:bg-[#383838] transition">
-            Cancel
+            취소
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
             className="px-6 py-2 text-sm bg-gradient-to-r from-purple-600 to-green-600 rounded font-medium hover:from-purple-500 hover:to-green-500 disabled:opacity-50 transition"
           >
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? '저장 중...' : '저장'}
           </button>
         </div>
       </div>
@@ -279,21 +221,64 @@ function ClaudeProviderSettings({
   settings: ClaudeSettings;
   onChange: (s: ClaudeSettings) => void;
 }) {
+  const [cliStatus, setCliStatus] = useState<{ available: boolean; auth: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    if (settings.selectedTransport === 'cli') {
+      setChecking(true);
+      Promise.all([
+        window.api.claudeCodeAvailable?.(),
+        window.api.claudeCodeAuthStatus?.().catch(() => null),
+      ]).then(([available, auth]) => {
+        setCliStatus({ available: !!available, auth: auth ? (auth.email || 'logged in') : '' });
+        setChecking(false);
+      }).catch(() => {
+        setCliStatus({ available: false, auth: '' });
+        setChecking(false);
+      });
+    }
+  }, [settings.selectedTransport]);
+
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-bold text-purple-400">Claude (Anthropic)</h3>
 
-      <Field label="Transport">
+      <Field label="연결 방식">
         <select
           value={settings.selectedTransport}
           onChange={(e) => onChange({ ...settings, selectedTransport: e.target.value as any })}
           className="input-field"
         >
-          <option value="api">API Key</option>
-          <option value="cli">Claude CLI (subscription)</option>
+          <option value="api">API Key (직접 입력)</option>
+          <option value="cli">Claude CLI (구독 계정)</option>
         </select>
         {settings.selectedTransport === 'cli' && (
-          <p className="text-[10px] text-gray-600 mt-1">Requires Claude Code CLI installed and logged in</p>
+          <div className="mt-2 px-3 py-2 rounded text-xs" style={{ background: '#1a1a1a', border: '1px solid #333' }}>
+            {checking ? (
+              <span className="text-gray-500">CLI 상태 확인 중...</span>
+            ) : cliStatus ? (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className={`w-1.5 h-1.5 rounded-full ${cliStatus.available ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className={cliStatus.available ? 'text-green-400' : 'text-red-400'}>
+                    {cliStatus.available ? 'CLI 설치됨' : 'CLI 미설치'}
+                  </span>
+                </div>
+                {cliStatus.available && (
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full ${cliStatus.auth ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                    <span className={cliStatus.auth ? 'text-green-400' : 'text-yellow-400'}>
+                      {cliStatus.auth ? `로그인: ${cliStatus.auth}` : '터미널에서 "claude" 실행하여 로그인 필요'}
+                    </span>
+                  </div>
+                )}
+                {!cliStatus.available && (
+                  <p className="text-gray-500 mt-1">설치: npm install -g @anthropic-ai/claude-code</p>
+                )}
+              </div>
+            ) : null}
+          </div>
         )}
       </Field>
 
@@ -336,6 +321,7 @@ function ClaudeProviderSettings({
             />
             <span className="text-xs text-gray-400 w-8">{settings.temperature}</span>
           </div>
+          <p className="text-[10px] text-gray-600 mt-1">낮을수록 일관된 응답, 높을수록 창의적</p>
         </Field>
 
         <Field label="Max Tokens">
@@ -351,17 +337,35 @@ function ClaudeProviderSettings({
             <option value={64000}>64,000</option>
             <option value={128000}>128,000</option>
           </select>
+          <p className="text-[10px] text-gray-600 mt-1">응답 최대 길이</p>
         </Field>
       </div>
 
-      <Field label="System Prompt (Optional)">
+      {settings.selectedTransport === 'cli' && (
+        <Field label="Effort">
+          <select
+            value={settings.effort || 'medium'}
+            onChange={(e) => onChange({ ...settings, effort: e.target.value as ClaudeEffort })}
+            className="input-field"
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="max">Max (Opus 전용)</option>
+          </select>
+          <p className="text-[10px] text-gray-600 mt-1">높을수록 깊이 사고하지만 느려짐. 기본값: medium</p>
+        </Field>
+      )}
+
+      <Field label="System Prompt">
         <textarea
           value={settings.systemPrompt || ''}
           onChange={(e) => onChange({ ...settings, systemPrompt: e.target.value })}
-          placeholder="Custom system prompt. Leave empty for default."
+          placeholder="AI의 역할을 커스텀. 비워두면 기본 토론 프롬프트 사용."
           rows={3}
           className="input-field resize-none"
         />
+        <p className="text-[10px] text-gray-600 mt-1">기본 토론 역할을 덮어씁니다. 보통은 비워둡니다.</p>
       </Field>
     </div>
   );
@@ -374,21 +378,74 @@ function CodexProviderSettings({
   settings: OpenAISettings;
   onChange: (s: OpenAISettings) => void;
 }) {
+  const [cliStatus, setCliStatus] = useState<{ available: boolean; email: string; plan: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    if (settings.selectedTransport === 'cli') {
+      setChecking(true);
+      Promise.all([
+        (window.api as any).codexCliAvailable?.(),
+        (window.api as any).codexCliAuthInfo?.().catch(() => null),
+      ]).then(([available, authInfo]) => {
+        setCliStatus({
+          available: !!available,
+          email: authInfo?.email || '',
+          plan: authInfo?.plan || '',
+        });
+        setChecking(false);
+      }).catch(() => {
+        setCliStatus({ available: false, email: '', plan: '' });
+        setChecking(false);
+      });
+    }
+  }, [settings.selectedTransport]);
+
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-bold text-green-400">Codex / GPT (OpenAI)</h3>
 
-      <Field label="Transport">
+      <Field label="연결 방식">
         <select
           value={settings.selectedTransport}
           onChange={(e) => onChange({ ...settings, selectedTransport: e.target.value as any })}
           className="input-field"
         >
-          <option value="api">API Key</option>
-          <option value="cli">Codex CLI (ChatGPT subscription)</option>
+          <option value="api">API Key (직접 입력)</option>
+          <option value="cli">Codex CLI (ChatGPT 구독)</option>
         </select>
         {settings.selectedTransport === 'cli' && (
-          <p className="text-[10px] text-gray-600 mt-1">Requires Codex CLI installed and logged in via ChatGPT account</p>
+          <div className="mt-2 px-3 py-2 rounded text-xs" style={{ background: '#1a1a1a', border: '1px solid #333' }}>
+            {checking ? (
+              <span className="text-gray-500">CLI 상태 확인 중...</span>
+            ) : cliStatus ? (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className={`w-1.5 h-1.5 rounded-full ${cliStatus.available ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className={cliStatus.available ? 'text-green-400' : 'text-red-400'}>
+                    {cliStatus.available ? 'CLI 설치됨' : 'CLI 미설치'}
+                  </span>
+                </div>
+                {cliStatus.available && cliStatus.email && (
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    <span className="text-green-400">
+                      로그인: {cliStatus.email}{cliStatus.plan ? ` (${cliStatus.plan})` : ''}
+                    </span>
+                  </div>
+                )}
+                {cliStatus.available && !cliStatus.email && (
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                    <span className="text-yellow-400">터미널에서 "codex" 실행하여 로그인 필요</span>
+                  </div>
+                )}
+                {!cliStatus.available && (
+                  <p className="text-gray-500 mt-1">설치: npm install -g @openai/codex</p>
+                )}
+              </div>
+            ) : null}
+          </div>
         )}
       </Field>
 
@@ -431,6 +488,7 @@ function CodexProviderSettings({
             />
             <span className="text-xs text-gray-400 w-8">{settings.temperature}</span>
           </div>
+          <p className="text-[10px] text-gray-600 mt-1">낮을수록 일관된 응답, 높을수록 창의적</p>
         </Field>
 
         <Field label="Max Tokens">
@@ -446,6 +504,7 @@ function CodexProviderSettings({
             <option value={64000}>64,000</option>
             <option value={128000}>128,000</option>
           </select>
+          <p className="text-[10px] text-gray-600 mt-1">응답 최대 길이</p>
         </Field>
       </div>
 
@@ -455,19 +514,19 @@ function CodexProviderSettings({
           onChange={(e) => onChange({ ...settings, reasoningEffort: e.target.value as ReasoningEffort })}
           className="input-field"
         >
-          <option value="none">None — Standard generation</option>
-          <option value="low">Low — Light reasoning</option>
-          <option value="medium">Medium — Balanced (recommended for debate)</option>
-          <option value="high">High — Deep reasoning</option>
+          <option value="none">None</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
         </select>
-        <p className="text-[10px] text-gray-600 mt-1">GPT-5.4 supports built-in reasoning levels</p>
+        <p className="text-[10px] text-gray-600 mt-1">높을수록 논리적으로 사고하지만 느려짐. 토론에는 medium 추천.</p>
       </Field>
 
-      <Field label="System Prompt (Optional)">
+      <Field label="시스템 프롬프트 (선택)">
         <textarea
           value={settings.systemPrompt || ''}
           onChange={(e) => onChange({ ...settings, systemPrompt: e.target.value })}
-          placeholder="Custom system prompt. Leave empty for default."
+          placeholder="AI의 기본 역할을 지정합니다. 비워두면 기본값 사용."
           rows={3}
           className="input-field resize-none"
         />

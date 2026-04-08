@@ -1,17 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { DebateMessage, AppReadiness, ModeStatus } from '../../shared/types';
+import { DebateMessage, DebateMode, AppReadiness, ModeStatus } from '../../shared/types';
 import { MarkdownMessage } from './MarkdownMessage';
+import { AgentActivityPanel } from './AgentActivityPanel';
 
 interface Props {
   messages: DebateMessage[];
   status: string;
   projectPath: string;
+  selectedMode: DebateMode;
+  settingsVersion: number;
   onProjectPathChange: (path: string) => void;
   onOpenDirectory: () => void;
   onOpenSettings: (tab?: string) => void;
+  onModeChange: (mode: DebateMode) => void;
 }
 
-export function DebatePanel({ messages, status, projectPath, onProjectPathChange, onOpenDirectory, onOpenSettings }: Props) {
+export function DebatePanel({ messages, status, projectPath, selectedMode, settingsVersion, onProjectPathChange, onOpenDirectory, onOpenSettings, onModeChange }: Props) {
   const [input, setInput] = useState('');
   const [readiness, setReadiness] = useState<AppReadiness | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -25,11 +29,11 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
   // Fetch readiness on mount and when project changes
   useEffect(() => {
     window.api.getReadiness?.(projectPath).then(setReadiness).catch(() => {});
-  }, [projectPath, status]);
+  }, [projectPath, status, settingsVersion]);
 
   const handleSubmit = async () => {
     if (!input.trim() || !projectPath.trim() || isActive) return;
-    await window.api.startDebate(input.trim(), projectPath.trim());
+    await window.api.startDebate(input.trim(), projectPath.trim(), selectedMode);
     setInput('');
   };
 
@@ -61,8 +65,10 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
           <ReadinessDashboard
             readiness={readiness}
             projectPath={projectPath}
+            selectedMode={selectedMode}
             onOpenDirectory={onOpenDirectory}
             onOpenSettings={onOpenSettings}
+            onModeChange={onModeChange}
           />
         )}
 
@@ -126,19 +132,27 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
                 )}
               </div>
 
-              <div
-                className="rounded-md px-3 py-2.5 text-xs"
-                style={{
-                  background: 'var(--bg-2)',
-                  border: '1px solid var(--border)',
-                  lineHeight: 1.6,
-                }}
-              >
-                <MarkdownMessage
-                  content={msg.content}
+              {msg.agentEvents && msg.agentEvents.length > 0 ? (
+                <AgentActivityPanel
+                  events={msg.agentEvents}
                   isStreaming={isActive && msg === messages[messages.length - 1]}
+                  provider={msg.role === 'claude' ? 'claude' : 'codex'}
                 />
-              </div>
+              ) : (
+                <div
+                  className="message-content rounded-md px-3 py-2.5 text-xs"
+                  style={{
+                    background: 'var(--bg-2)',
+                    border: '1px solid var(--border)',
+                    lineHeight: 1.6,
+                  }}
+                >
+                  <MarkdownMessage
+                    content={msg.content}
+                    isStreaming={isActive && msg === messages[messages.length - 1]}
+                  />
+                </div>
+              )}
             </div>
           );
         })}
@@ -211,7 +225,7 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
               minWidth: 96,
             }}
           >
-            {isActive ? 'Debating...' : 'Start Debate'}
+            {isActive ? 'Debating...' : 'Send'}
           </button>
         </div>
       </div>
@@ -226,13 +240,17 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
 function ReadinessDashboard({
   readiness,
   projectPath,
+  selectedMode,
   onOpenDirectory,
   onOpenSettings,
+  onModeChange,
 }: {
   readiness: AppReadiness | null;
   projectPath: string;
+  selectedMode: DebateMode;
   onOpenDirectory: () => void;
   onOpenSettings: (tab?: string) => void;
+  onModeChange: (mode: DebateMode) => void;
 }) {
   if (!readiness) {
     return (
@@ -294,10 +312,15 @@ function ReadinessDashboard({
         />
       </div>
 
-      {/* Modes Row */}
+      {/* Mode Selector */}
       <div className="flex gap-2">
         {modes.map((m) => (
-          <ModeChip key={m.mode} mode={m} />
+          <ModeChip
+            key={m.mode}
+            mode={m}
+            selected={m.mode === selectedMode}
+            onClick={() => m.enabled && onModeChange(m.mode)}
+          />
         ))}
       </div>
 
@@ -365,25 +388,29 @@ function ProviderCard({
   );
 }
 
-function ModeChip({ mode }: { mode: ModeStatus }) {
+function ModeChip({ mode, selected, onClick }: { mode: ModeStatus; selected: boolean; onClick: () => void }) {
   const labels: Record<string, string> = {
     'debate': 'Debate',
     'claude-only': 'Claude Only',
     'codex-only': 'Codex Only',
   };
+  const isActive = mode.enabled && selected;
   return (
-    <div
-      className="text-xs px-2.5 py-1 rounded"
+    <button
+      onClick={onClick}
+      disabled={!mode.enabled}
+      className="text-xs px-3 py-1.5 rounded transition"
       style={{
-        background: mode.enabled ? 'rgba(99,102,241,0.15)' : 'var(--bg-2)',
-        color: mode.enabled ? 'var(--accent)' : 'var(--text-3)',
-        border: `1px solid ${mode.enabled ? 'rgba(99,102,241,0.3)' : 'var(--border)'}`,
-        opacity: mode.enabled ? 1 : 0.5,
+        background: isActive ? 'var(--accent)' : mode.enabled ? 'rgba(99,102,241,0.1)' : 'var(--bg-2)',
+        color: isActive ? 'white' : mode.enabled ? 'var(--accent)' : 'var(--text-3)',
+        border: `1px solid ${isActive ? 'var(--accent)' : mode.enabled ? 'rgba(99,102,241,0.3)' : 'var(--border)'}`,
+        opacity: mode.enabled ? 1 : 0.4,
+        cursor: mode.enabled ? 'pointer' : 'not-allowed',
       }}
-      title={mode.blockers.length > 0 ? mode.blockers.join(', ') : 'Ready'}
+      title={mode.blockers.length > 0 ? mode.blockers.join(', ') : selected ? 'Selected' : 'Click to select'}
     >
       {labels[mode.mode] || mode.mode}
-    </div>
+    </button>
   );
 }
 

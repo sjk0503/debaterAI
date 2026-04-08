@@ -1,6 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('api', {
+  // ── Agent Runtime ────────────────────────────────────────────────────────
+  spawnAgent: (opts: any) =>
+    ipcRenderer.invoke('agent:spawn', opts),
+  killAgent: (agentId: string) =>
+    ipcRenderer.invoke('agent:kill', { agentId }),
+  killAllAgents: () =>
+    ipcRenderer.invoke('agent:killAll'),
+  onAgentEvent: (cb: (event: any) => void) => {
+    ipcRenderer.on('agent:event', (_e, event) => cb(event));
+    return () => ipcRenderer.removeAllListeners('agent:event');
+  },
+
   // ── App Readiness ────────────────────────────────────────────────────────
   getReadiness: (projectPath: string) =>
     ipcRenderer.invoke('app:getReadiness', { projectPath }),
@@ -8,8 +20,8 @@ contextBridge.exposeInMainWorld('api', {
   // ── Debate ──────────────────────────────────────────────────────────────
   validateStart: () =>
     ipcRenderer.invoke('debate:validateStart'),
-  startDebate: (prompt: string, projectPath: string) =>
-    ipcRenderer.invoke('debate:start', { prompt, projectPath }),
+  startDebate: (prompt: string, projectPath: string, mode?: string) =>
+    ipcRenderer.invoke('debate:start', { prompt, projectPath, mode }),
   intervene: (decision: string) =>
     ipcRenderer.invoke('debate:intervene', { decision }),
   applyCode: (debateId: string) =>
@@ -125,4 +137,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('claudeCode:taskUpdate', (_e, data) => cb(data));
     return () => ipcRenderer.removeAllListeners('claudeCode:taskUpdate');
   },
+
+  // ── Codex CLI ─────────────────────────────────────────────────────────────
+  codexCliAvailable: () => ipcRenderer.invoke('codexCli:isAvailable'),
+  codexCliAuthInfo: () => ipcRenderer.invoke('codexCli:authInfo'),
 });

@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import { EventEmitter } from 'events';
 
 /**
@@ -7,15 +7,40 @@ import { EventEmitter } from 'events';
  */
 export class ClaudeCodeService extends EventEmitter {
   private processes: Map<string, ChildProcess> = new Map();
+  private binaryPath: string | null = null;
+
+  /**
+   * Resolve the full path to claude binary (Electron may not inherit shell PATH)
+   */
+  resolveBinary(): string {
+    if (this.binaryPath) return this.binaryPath;
+    try {
+      this.binaryPath = execSync('which claude', { encoding: 'utf8', timeout: 3000 }).trim();
+    } catch {
+      const fs = require('fs');
+      const candidates = [
+        `${process.env.HOME}/.local/bin/claude`,
+        '/opt/homebrew/bin/claude',
+        '/usr/local/bin/claude',
+      ];
+      for (const p of candidates) {
+        if (fs.existsSync(p)) {
+          this.binaryPath = p;
+          return p;
+        }
+      }
+      this.binaryPath = 'claude';
+    }
+    return this.binaryPath!;
+  }
 
   /**
    * Claude Code CLI가 설치되어 있는지 확인
    */
   async isAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
-      const proc = spawn('claude', ['--version'], { timeout: 5000 });
-      let output = '';
-      proc.stdout?.on('data', (d) => (output += d));
+      const bin = this.resolveBinary();
+      const proc = spawn(bin, ['--version'], { timeout: 5000 });
       proc.on('close', (code) => resolve(code === 0));
       proc.on('error', () => resolve(false));
     });
@@ -26,7 +51,7 @@ export class ClaudeCodeService extends EventEmitter {
    */
   async getAuthStatus(): Promise<any> {
     return new Promise((resolve, reject) => {
-      const proc = spawn('claude', ['auth', 'status', '--json'], { timeout: 5000 });
+      const proc = spawn(this.resolveBinary(), ['auth', 'status', '--json'], { timeout: 5000 });
       let output = '';
       proc.stdout?.on('data', (d) => (output += d));
       proc.on('close', () => {
@@ -71,7 +96,7 @@ export class ClaudeCodeService extends EventEmitter {
 
       args.push(prompt);
 
-      const proc = spawn('claude', args, {
+      const proc = spawn(this.resolveBinary(), args, {
         cwd,
         timeout: options.timeout || 120000,
         env: { ...process.env, FORCE_COLOR: '0' },
@@ -129,7 +154,7 @@ export class ClaudeCodeService extends EventEmitter {
 
     args.push(prompt);
 
-    const proc = spawn('claude', args, {
+    const proc = spawn(this.resolveBinary(), args, {
       cwd,
       env: { ...process.env, FORCE_COLOR: '0' },
     });
