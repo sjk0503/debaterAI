@@ -145,6 +145,7 @@ export class ClaudeStreamParser {
           } catch {
             // Failed to parse tool input
           }
+          this.pendingToolUse = null;
         }
         break;
       }

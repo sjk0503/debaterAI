@@ -198,7 +198,7 @@ export class AIService {
     let claudeStatus: ProviderStatus;
     if (settings.claude.selectedTransport === 'cli') {
       const cliStatus = await this.getClaudeCliStatus();
-      this.cachedCliStatus = cliStatus;
+      this.cachedClaudeCliStatus = cliStatus;
       claudeStatus = {
         provider: 'claude',
         selectedTransport: 'cli',
@@ -275,9 +275,9 @@ export class AIService {
     try {
       const available = await this.codexCli.isAvailable();
       if (!available) return 'notInstalled';
-      // Codex CLI auth is checked via a test exec — skip heavy check,
-      // assume configured if binary exists (real errors surface at exec time)
-      return 'configured';
+      const authInfo = await this.codexCli.getAuthInfo();
+      if (authInfo && authInfo.loggedIn) return 'configured';
+      return 'notLoggedIn';
     } catch {
       return 'error';
     }

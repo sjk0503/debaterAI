@@ -133,10 +133,10 @@ function setupIPC() {
   });
 
   // Validate before starting debate
-  ipcMain.handle('debate:validateStart', async () => {
+  ipcMain.handle('debate:validateStart', async (_event, { mode } = {}) => {
     if (!debateEngine) return { valid: false, error: 'Engine not initialized' };
-    const settings = aiService.getSettings();
-    return debateEngine.validateStart(settings.debate.preferredMode);
+    const resolvedMode = mode || aiService.getSettings().debate.preferredMode;
+    return debateEngine.validateStart(resolvedMode);
   });
 
   // 토론 시작
