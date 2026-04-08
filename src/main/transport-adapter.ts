@@ -222,7 +222,8 @@ export class ClaudeCliAdapter implements TransportAdapter {
           }
         }
 
-        if (code === 0 || fullText) {
+        // code 143 = SIGTERM (normal kill), code 137 = SIGKILL — not real errors
+        if (code === 0 || fullText || code === 143 || code === 137) {
           resolve(fullText);
         } else {
           reject(new Error(`Claude CLI exited with code ${code}: ${stderr}`));
@@ -437,7 +438,7 @@ export class CodexCliAdapter implements TransportAdapter {
           }
         }
 
-        if (code === 0 || fullText) {
+        if (code === 0 || fullText || code === 143 || code === 137) {
           resolve(fullText);
         } else {
           reject(new Error(`Codex CLI exited with code ${code}: ${stderr}`));

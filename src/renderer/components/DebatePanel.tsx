@@ -22,13 +22,14 @@ interface Props {
   onShowDiff?: () => void;
   onApplyCode?: () => void;
   onAddSystemMessage?: (content: string) => void;
+  onSessionStarted?: (debateId: string) => void;
 }
 
 export function DebatePanel({
   messages, status, projectPath, selectedMode, settingsVersion,
   currentSessionId, latestAgentEvent,
   onProjectPathChange, onOpenDirectory, onOpenSettings, onModeChange,
-  onClearMessages, onShowDiff, onApplyCode, onAddSystemMessage,
+  onClearMessages, onShowDiff, onApplyCode, onAddSystemMessage, onSessionStarted,
 }: Props) {
   const [input, setInput] = useState('');
   const [readiness, setReadiness] = useState<AppReadiness | null>(null);
@@ -72,7 +73,8 @@ export function DebatePanel({
       return;
     }
 
-    await window.api.startDebate(input.trim(), projectPath.trim(), selectedMode, currentSessionId || undefined);
+    const debateId = await window.api.startDebate(input.trim(), projectPath.trim(), selectedMode, currentSessionId || undefined);
+    if (debateId) onSessionStarted?.(debateId);
     setInput('');
   };
 
@@ -159,7 +161,7 @@ export function DebatePanel({
             return (
               <div key={msg.id} className="flex items-center gap-3 py-1">
                 <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
-                <span className="text-xs shrink-0" style={{ color: 'var(--text-3)' }}>
+                <span className="text-xs shrink-0 selectable-text" style={{ color: 'var(--text-3)' }}>
                   {msg.content}
                 </span>
                 <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />

@@ -31,36 +31,46 @@ export class DebateEngine {
     this.statusCallback = cb;
   }
 
-  private emit(msg: DebateMessage, sessionId?: string) {
+  private emit(msg: DebateMessage, sessionId: string) {
     this.messageCallback?.(msg);
     // Persist to session store
-    if (sessionId) {
-      if (msg.role === 'system') {
-        this.sessionStore.append(sessionId, {
-          type: 'system_message',
-          timestamp: msg.timestamp,
-          data: { kind: 'system_message', content: msg.content },
-        });
-      } else if (msg.role === 'user') {
-        this.sessionStore.append(sessionId, {
-          type: 'user_message',
-          timestamp: msg.timestamp,
-          data: { kind: 'user_message', content: msg.content },
-        });
-      }
-      // Agent messages are persisted via agent events in the runtime layer
+    if (msg.role === 'system') {
+      this.sessionStore.append(sessionId, {
+        type: 'system_message',
+        timestamp: msg.timestamp,
+        data: { kind: 'system_message', content: msg.content },
+      });
+    } else if (msg.role === 'user') {
+      this.sessionStore.append(sessionId, {
+        type: 'user_message',
+        timestamp: msg.timestamp,
+        data: { kind: 'user_message', content: msg.content },
+      });
     }
+    // Agent streaming messages (claude/codex) are emitted frequently during streaming;
+    // we persist the final version only (not every chunk)
   }
 
   private setStatus(debateId: string, status: DebateStatus) {
     const session = this.sessions.get(debateId);
     if (session) session.status = status;
     this.statusCallback?.({ debateId, status });
-    // Persist status change
     this.sessionStore.append(debateId, {
       type: 'status_change',
       timestamp: Date.now(),
       data: { kind: 'status_change', status },
+    });
+  }
+
+  /** Persist a completed agent message (called once after streaming finishes) */
+  private persistAgentMessage(sessionId: string, msg: DebateMessage) {
+    this.sessionStore.append(sessionId, {
+      type: 'system_message',
+      timestamp: msg.timestamp,
+      data: {
+        kind: 'system_message',
+        content: `[${msg.role}${msg.round ? ` round ${msg.round}` : ''}] ${msg.content}`,
+      },
     });
   }
 
@@ -69,9 +79,6 @@ export class DebateEngine {
     return this.sessionStore;
   }
 
-  /**
-   * Validate that a debate can start — checks provider readiness for the given mode
-   */
   validateStart(mode: string): { valid: boolean; error?: string } {
     if (mode === 'debate') {
       if (!this.ai.isClaudeReady() || !this.ai.isCodexReady()) {
@@ -89,9 +96,6 @@ export class DebateEngine {
     return { valid: true };
   }
 
-  /**
-   * Compute which modes are enabled given current provider state
-   */
   getEnabledModes(): ModeStatus[] {
     const claudeReady = this.ai.isClaudeReady();
     const codexReady = this.ai.isCodexReady();
@@ -126,11 +130,9 @@ export class DebateEngine {
     const settings = this.ai.getSettings();
 
     // Use existing session ID if provided (continuation), otherwise create a new one
-    const debateId = existingSessionId || this.sessionStore.create({
-      prompt,
-      projectPath,
-      mode: resolvedMode,
-    });
+    const debateId = (existingSessionId && existingSessionId.length > 0)
+      ? existingSessionId
+      : this.sessionStore.create({ prompt, projectPath, mode: resolvedMode });
 
     const session: DebateSession = {
       id: debateId,
@@ -157,7 +159,7 @@ export class DebateEngine {
       timestamp: Date.now(),
     };
     session.messages.push(userMsg);
-    this.emit(userMsg);
+    this.emit(userMsg, debateId);
 
     session.projectContext = projectContext || '';
 
@@ -170,7 +172,7 @@ export class DebateEngine {
         role: 'system',
         content: `Error: ${err.message}`,
         timestamp: Date.now(),
-      });
+      }, debateId);
     });
 
     return debateId;
@@ -205,10 +207,9 @@ export class DebateEngine {
         content: `🔄 Round ${round}/${session.maxRounds}`,
         timestamp: Date.now(),
         round,
-      });
+      }, debateId);
 
       const claudePrompt = this.buildClaudePrompt(session, round);
-      let claudeResponse = '';
 
       const claudeMsg: DebateMessage = {
         id: uuidv4(),
@@ -217,7 +218,7 @@ export class DebateEngine {
         timestamp: Date.now(),
         round,
       };
-      this.emit(claudeMsg);
+      this.emit(claudeMsg, debateId);
 
       const claudeSystemPrompt = buildSystemPrompt({
         agent: 'claude',
@@ -233,21 +234,21 @@ export class DebateEngine {
         })),
       });
 
-      claudeResponse = await this.ai.askClaude(
+      const claudeResponse = await this.ai.askClaude(
         claudeSystemPrompt,
         [{ role: 'user', content: claudePrompt }],
         (chunk) => {
           claudeMsg.content += chunk;
-          this.emit({ ...claudeMsg, content: claudeMsg.content });
+          this.emit({ ...claudeMsg, content: claudeMsg.content }, debateId);
         },
       );
 
       claudeMsg.content = claudeResponse;
       session.messages.push(claudeMsg);
+      this.persistAgentMessage(debateId, claudeMsg);
 
       // === Codex 차례 ===
       const codexPrompt = this.buildCodexPrompt(session, claudeResponse, round);
-      let codexResponse = '';
 
       const codexMsg: DebateMessage = {
         id: uuidv4(),
@@ -256,7 +257,7 @@ export class DebateEngine {
         timestamp: Date.now(),
         round,
       };
-      this.emit(codexMsg);
+      this.emit(codexMsg, debateId);
 
       const codexSystemPrompt = buildSystemPrompt({
         agent: 'codex',
@@ -272,17 +273,18 @@ export class DebateEngine {
         })),
       });
 
-      codexResponse = await this.ai.askCodex(
+      const codexResponse = await this.ai.askCodex(
         codexSystemPrompt,
         [{ role: 'user', content: codexPrompt }],
         (chunk) => {
           codexMsg.content += chunk;
-          this.emit({ ...codexMsg, content: codexMsg.content });
+          this.emit({ ...codexMsg, content: codexMsg.content }, debateId);
         },
       );
 
       codexMsg.content = codexResponse;
       session.messages.push(codexMsg);
+      this.persistAgentMessage(debateId, codexMsg);
 
       // === 합의 판단 ===
       const claudeAgreement = this.parseAgreement(claudeResponse);
@@ -312,7 +314,7 @@ export class DebateEngine {
           content: `✅ 합의 도달! (Round ${round}) — 코드 생성을 시작합니다.`,
           timestamp: Date.now(),
           agreement: 'agree',
-        });
+        }, debateId);
         await this.generateCode(debateId);
         return;
       }
@@ -325,7 +327,7 @@ export class DebateEngine {
           content: `⚡ 부분 합의 (Round ${round}) — 토론을 계속합니다.`,
           timestamp: Date.now(),
           agreement: 'partial',
-        });
+        }, debateId);
       }
     }
 
@@ -336,7 +338,7 @@ export class DebateEngine {
       role: 'system',
       content: `⏰ 최대 라운드 도달 — Claude의 최종 제안으로 진행합니다.`,
       timestamp: Date.now(),
-    });
+    }, debateId);
     await this.generateCode(debateId);
   }
 
@@ -356,7 +358,7 @@ export class DebateEngine {
       role: 'system',
       content: `${agentLabel} 단독 모드로 진행합니다.`,
       timestamp: Date.now(),
-    });
+    }, debateId);
 
     const ctx = session.projectContext || '';
     const soloPrompt = `User request: "${session.prompt}"
@@ -387,7 +389,7 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
       timestamp: Date.now(),
       round: 1,
     };
-    this.emit(msg);
+    this.emit(msg, debateId);
 
     let response = '';
     if (agent === 'claude') {
@@ -396,7 +398,7 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
         [{ role: 'user', content: soloPrompt }],
         (chunk) => {
           msg.content += chunk;
-          this.emit({ ...msg, content: msg.content });
+          this.emit({ ...msg, content: msg.content }, debateId);
         },
       );
     } else {
@@ -405,7 +407,7 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
         [{ role: 'user', content: soloPrompt }],
         (chunk) => {
           msg.content += chunk;
-          this.emit({ ...msg, content: msg.content });
+          this.emit({ ...msg, content: msg.content }, debateId);
         },
       );
     }
@@ -413,20 +415,17 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
     msg.content = response;
     session.messages.push(msg);
     session.artifactMessageId = msg.id;
+    this.persistAgentMessage(debateId, msg);
 
-    // 솔로 모드에서는 바로 코드 생성 완료
     this.setStatus(debateId, 'done');
     this.emit({
       id: uuidv4(),
       role: 'system',
       content: `🎉 ${agentLabel} 코드 생성 완료! 리뷰 후 적용하세요.`,
       timestamp: Date.now(),
-    });
+    }, debateId);
   }
 
-  /**
-   * Claude 프롬프트 생성
-   */
   private buildClaudePrompt(session: DebateSession, round: number): string {
     const ctx = session.projectContext || '';
     if (round === 1) {
@@ -446,12 +445,8 @@ ${lastRound.codexResponse}
 Please address Codex's feedback and refine your implementation. If you agree with the suggestions, incorporate them. If you disagree, explain why.`;
   }
 
-  /**
-   * Codex 프롬프트 생성
-   */
   private buildCodexPrompt(session: DebateSession, claudeResponse: string, round: number): string {
     const maxRespLen = 3000;
-
     const truncate = (s: string) =>
       s.length > maxRespLen ? s.slice(0, maxRespLen) + '\n... (truncated)' : s;
 
@@ -482,15 +477,11 @@ Please review this proposal. Consider:
 Provide your feedback. Agree if the approach is solid, or suggest specific improvements.`;
   }
 
-  /**
-   * [AGREEMENT: xxx] 파싱
-   */
   private parseAgreement(response: string): Agreement {
     const match = response.match(/\[AGREEMENT:\s*(agree|partial|disagree)\]/i);
     if (match) {
       return match[1].toLowerCase() as Agreement;
     }
-    // 키워드 기반 fallback
     const lower = response.toLowerCase();
     if (lower.includes('i agree') || lower.includes('looks good') || lower.includes('solid approach')) {
       return 'agree';
@@ -501,9 +492,6 @@ Provide your feedback. Agree if the approach is solid, or suggest specific impro
     return 'partial';
   }
 
-  /**
-   * 합의된 코드 생성
-   */
   private async generateCode(debateId: string) {
     const session = this.sessions.get(debateId);
     if (!session) return;
@@ -531,27 +519,27 @@ Generate the complete implementation. For each file, use this format:
 
 Only output the final code files, no explanations needed.`;
 
-    let codeResponse = '';
     const codeMsg: DebateMessage = {
       id: uuidv4(),
       role: 'claude',
       content: '',
       timestamp: Date.now(),
     };
-    this.emit(codeMsg);
+    this.emit(codeMsg, debateId);
 
-    codeResponse = await this.ai.askClaude(
+    const codeResponse = await this.ai.askClaude(
       'You are a code generator. Output only clean, production-ready code files.',
       [{ role: 'user', content: codeGenPrompt }],
       (chunk) => {
         codeMsg.content += chunk;
-        this.emit({ ...codeMsg, content: codeMsg.content });
+        this.emit({ ...codeMsg, content: codeMsg.content }, debateId);
       },
     );
 
     codeMsg.content = codeResponse;
     session.messages.push(codeMsg);
     session.artifactMessageId = codeMsg.id;
+    this.persistAgentMessage(debateId, codeMsg);
 
     this.setStatus(debateId, 'done');
     this.emit({
@@ -559,31 +547,22 @@ Only output the final code files, no explanations needed.`;
       role: 'system',
       content: '🎉 코드 생성 완료! 리뷰 후 적용하세요.',
       timestamp: Date.now(),
-    });
+    }, debateId);
   }
 
-  /**
-   * 사용자 개입
-   */
   userIntervene(decision: 'accept-claude' | 'accept-codex' | 'continue' | 'custom') {
-    // TODO: Guided 모드에서 사용자가 방향 결정
     return { success: true };
   }
 
-  /**
-   * 합의된 코드를 파싱해서 파일에 적용
-   */
   async applyConsensus(debateId: string): Promise<{ success: boolean; files: string[]; errors: string[] }> {
     const session = this.sessions.get(debateId);
     if (!session) return { success: false, files: [], errors: ['Session not found'] };
 
-    // Find the artifact message — either tracked by ID or fallback to last code-bearing message
     let artifactMsg: DebateMessage | undefined;
     if (session.artifactMessageId) {
       artifactMsg = session.messages.find((m) => m.id === session.artifactMessageId);
     }
     if (!artifactMsg) {
-      // Fallback: find the last message (any role) with code blocks
       artifactMsg = [...session.messages]
         .reverse()
         .find((m) => (m.role === 'claude' || m.role === 'codex') && m.content.includes('```'));
@@ -619,31 +598,21 @@ Only output the final code files, no explanations needed.`;
         role: 'system',
         content: `💾 파일 적용 완료:\n${appliedFiles.map(f => `  ✓ ${f}`).join('\n')}${errors.length > 0 ? `\n\n⚠️ 오류:\n${errors.join('\n')}` : ''}`,
         timestamp: Date.now(),
-      });
+      }, debateId);
     }
 
     return { success: errors.length === 0, files: appliedFiles, errors };
   }
 
-  /**
-   * AI 응답에서 파일별 코드 추출
-   * 지원 포맷:
-   *   --- FILE: path/to/file.ts ---
-   *   ```typescript
-   *   // code
-   *   ```
-   */
   private parseCodeFiles(content: string, projectPath: string): { path: string; content: string }[] {
     const files: { path: string; content: string }[] = [];
 
-    // 패턴 1: --- FILE: path --- + 코드 블록
     const filePattern = /---\s*FILE:\s*(.+?)\s*---\s*\n```\w*\n([\s\S]*?)```/g;
     let match;
     while ((match = filePattern.exec(content)) !== null) {
       files.push({ path: match[1].trim(), content: match[2].trim() });
     }
 
-    // 패턴 2: `path/to/file.ts` 헤더 + 코드 블록 (fallback)
     if (files.length === 0) {
       const altPattern = /`([\w/.-]+\.[\w]+)`[:\s]*\n```\w*\n([\s\S]*?)```/g;
       while ((match = altPattern.exec(content)) !== null) {

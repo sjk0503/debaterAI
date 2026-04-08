@@ -136,7 +136,7 @@ export default function App() {
   };
 
   const handleSelectSession = async (sessionId: string) => {
-    if (sessionId === currentSessionId) return;
+    // Allow re-clicking the same session to reload it (don't skip)
     if (isActive) {
       await window.api.killAllAgents?.().catch(() => {});
     }
@@ -292,6 +292,10 @@ export default function App() {
       onShowDiff={handleShowDiff}
       onApplyCode={handleApplyCode}
       onAddSystemMessage={handleAddSystemMessage}
+      onSessionStarted={(debateId) => {
+        setCurrentSessionId(debateId);
+        setSessionRefresh((v) => v + 1);
+      }}
     />
   );
 

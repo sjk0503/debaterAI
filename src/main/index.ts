@@ -197,6 +197,14 @@ function setupIPC() {
   });
 
   // 토론 시작
+  // Register debate callbacks ONCE (not per-request)
+  debateEngine.onMessage((message) => {
+    mainWindow?.webContents.send('debate:message', message);
+  });
+  debateEngine.onStatusChange((status) => {
+    mainWindow?.webContents.send('debate:status', status);
+  });
+
   ipcMain.handle('debate:start', async (_event, { prompt, projectPath, mode, sessionId }) => {
     if (!debateEngine || !mainWindow) return;
 
@@ -206,14 +214,6 @@ function setupIPC() {
     if (!validation.valid) {
       return { error: validation.error };
     }
-
-    debateEngine.onMessage((message) => {
-      mainWindow?.webContents.send('debate:message', message);
-    });
-
-    debateEngine.onStatusChange((status) => {
-      mainWindow?.webContents.send('debate:status', status);
-    });
 
     // Set project path for CLI adapter
     aiService.setProjectPath(projectPath);

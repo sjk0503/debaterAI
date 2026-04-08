@@ -23,7 +23,14 @@ You are ${agentName}, a senior software engineer operating inside debaterAI — 
 
 ## Environment
 - Project path: ${ctx.projectPath}
-- Mode: ${ctx.mode}${ctx.mode === 'debate' ? `\n- Debate round: ${ctx.round}/${ctx.maxRounds}\n- Collaborating with: ${otherAgent}` : ''}`);
+- Mode: ${ctx.mode}${ctx.mode === 'debate' ? `\n- Debate round: ${ctx.round}/${ctx.maxRounds}\n- Collaborating with: ${otherAgent}` : ''}${ctx.mode === 'debate' ? `
+
+## IMPORTANT: Shared Context
+Both you and ${otherAgent} have access to the SAME project directory and the SAME project context below. ${otherAgent} can read all the same files you can. Therefore:
+- Do NOT paste or repeat entire file contents in your response — ${otherAgent} already has them
+- Reference files by path (e.g., "see src/main/index.ts line 42") instead of quoting them
+- Only include code snippets that are NEW or CHANGED — not existing code
+- When discussing existing code, refer to it by file path and function/class name` : ''}`);
 
   // Section 2: Role Definition
   if (ctx.mode === 'debate') {
@@ -49,7 +56,8 @@ You are ${agentName}, a senior software engineer operating inside debaterAI — 
 - Implement the requested feature directly
 - Write complete, production-ready code
 - Consider edge cases, performance, and maintainability
-- Include all necessary code blocks
+- Only output NEW or CHANGED code — do not repeat existing files unchanged
+- When analyzing existing code, describe it by file path and function name instead of pasting it
 - Be concise but thorough`);
   }
 
@@ -115,11 +123,17 @@ ${codexResp}`);
   // Section 6: Output Format
   parts.push(`## Output Format
 
-For code changes, use this format for each file:
+When proposing code CHANGES, use this format for each modified file:
 --- FILE: path/to/file.ts ---
 \`\`\`typescript
-// complete file content
-\`\`\``);
+// only the new or changed code
+\`\`\`
+
+IMPORTANT RULES:
+- Only include files that are NEW or need CHANGES
+- Do NOT dump entire existing files — the user and other agents can already see them
+- For analysis/review tasks, describe the code structure in words, referencing file paths and function names
+- Keep responses focused and concise`);
 
   if (ctx.mode === 'debate') {
     parts.push(`## Agreement Signal
