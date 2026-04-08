@@ -13,6 +13,20 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeAllListeners('agent:event');
   },
 
+  // ── Orchestrator ─────────────────────────────────────────────────────────
+  startParallelDebate: (opts: any) =>
+    ipcRenderer.invoke('orchestrator:startParallel', opts),
+  mergeTask: (taskId: string, commitMessage?: string) =>
+    ipcRenderer.invoke('orchestrator:merge', { taskId, commitMessage }),
+  discardTask: (taskId: string) =>
+    ipcRenderer.invoke('orchestrator:discard', { taskId }),
+  getTasks: (sessionId: string) =>
+    ipcRenderer.invoke('orchestrator:tasks', { sessionId }),
+  onOrchestratorEvent: (cb: (event: any) => void) => {
+    ipcRenderer.on('orchestrator:event', (_e, event) => cb(event));
+    return () => ipcRenderer.removeAllListeners('orchestrator:event');
+  },
+
   // ── Sessions ────────────────────────────────────────────────────────────
   sessionList: () => ipcRenderer.invoke('session:list'),
   sessionLoad: (sessionId: string) => ipcRenderer.invoke('session:load', { sessionId }),

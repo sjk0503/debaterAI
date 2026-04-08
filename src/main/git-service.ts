@@ -163,7 +163,7 @@ export class GitService {
    * 두 브랜치 간 diff
    */
   async diffBranches(projectPath: string, from: string, to: string): Promise<string> {
-    return this.git(projectPath, ['diff', `${from}...${to}`, '--no-color']);
+    return this.git(projectPath, ['diff', from, to, '--no-color']);
   }
 
   /**
@@ -220,6 +220,43 @@ export class GitService {
       return { merged: true };
     } catch (err: any) {
       return { merged: false, error: err.message };
+    }
+  }
+
+  // ============================================================================
+  // Worktree Comparison (Phase 4)
+  // ============================================================================
+
+  /**
+   * Diff between two worktrees (via their branches)
+   */
+  async diffWorktrees(projectPath: string, branchA: string, branchB: string): Promise<string> {
+    return this.git(projectPath, ['diff', branchA, branchB, '--no-color', '--stat']);
+  }
+
+  /**
+   * Full diff between two branches (file content)
+   */
+  async diffWorktreesFull(projectPath: string, branchA: string, branchB: string): Promise<string> {
+    return this.git(projectPath, ['diff', branchA, branchB, '--no-color']);
+  }
+
+  /**
+   * List changed files between two branches
+   */
+  async changedFiles(projectPath: string, branchA: string, branchB: string): Promise<string[]> {
+    const result = await this.git(projectPath, ['diff', '--name-only', branchA, branchB]);
+    return result.trim().split('\n').filter(Boolean);
+  }
+
+  /**
+   * Delete a branch (force)
+   */
+  async deleteBranch(projectPath: string, branchName: string): Promise<void> {
+    try {
+      await this.git(projectPath, ['branch', '-D', branchName]);
+    } catch {
+      // Branch may not exist
     }
   }
 

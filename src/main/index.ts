@@ -10,10 +10,13 @@ import { ClaudeCodeService } from './claude-code-service';
 import { CodexCliService } from './codex-cli-service';
 import { AppReadiness, ReadinessAction } from '../shared/types';
 import { AgentRuntime } from './agent-runtime';
+import { Orchestrator } from './orchestrator';
+import { SessionStore } from './session-store';
 
 let mainWindow: BrowserWindow | null = null;
 let debateEngine: DebateEngine | null = null;
 let agentRuntime: AgentRuntime | null = null;
+let orchestrator: Orchestrator | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -52,8 +55,10 @@ function setupIPC() {
   const terminalService = new TerminalService();
   const searchService = new SearchService();
   const permissionService = new PermissionService();
-  debateEngine = new DebateEngine(aiService);
+  const sessionStore = new SessionStore();
+  debateEngine = new DebateEngine(aiService, sessionStore);
   agentRuntime = new AgentRuntime();
+  orchestrator = new Orchestrator(agentRuntime, gitService, sessionStore);
 
   // ============================================================================
   // Agent Runtime — spawn full CLI agents
@@ -77,6 +82,41 @@ function setupIPC() {
   ipcMain.handle('agent:killAll', async () => {
     agentRuntime?.killAll();
     return { success: true };
+  });
+
+  // ============================================================================
+  // Orchestrator — parallel agent debate
+  // ============================================================================
+  ipcMain.handle('orchestrator:startParallel', async (_event, opts) => {
+    if (!orchestrator || !mainWindow) return { error: 'Not initialized' };
+
+    const result = await orchestrator.startParallelDebate({
+      ...opts,
+      onEvent: (event) => {
+        mainWindow?.webContents.send('orchestrator:event', event);
+      },
+    });
+
+    return {
+      claudeTaskId: result.claudeTask.id,
+      codexTaskId: result.codexTask.id,
+    };
+  });
+
+  ipcMain.handle('orchestrator:merge', async (_event, { taskId, commitMessage }) => {
+    if (!orchestrator) return { merged: false, error: 'Not initialized' };
+    return orchestrator.mergeTask(taskId, commitMessage);
+  });
+
+  ipcMain.handle('orchestrator:discard', async (_event, { taskId }) => {
+    if (!orchestrator) return;
+    await orchestrator.discardTask(taskId);
+    return { success: true };
+  });
+
+  ipcMain.handle('orchestrator:tasks', async (_event, { sessionId }) => {
+    if (!orchestrator) return [];
+    return orchestrator.getTaskManager().getForSession(sessionId);
   });
 
   // ============================================================================
