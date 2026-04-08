@@ -379,21 +379,30 @@ function CodexProviderSettings({
       <h3 className="text-sm font-bold text-green-400">Codex / GPT (OpenAI)</h3>
 
       <Field label="Transport">
-        <div className="flex items-center gap-2">
-          <span className="input-field text-gray-500 cursor-not-allowed">API Key</span>
-        </div>
-        <p className="text-[10px] text-gray-600 mt-1">Codex CLI support coming soon</p>
+        <select
+          value={settings.selectedTransport}
+          onChange={(e) => onChange({ ...settings, selectedTransport: e.target.value as any })}
+          className="input-field"
+        >
+          <option value="api">API Key</option>
+          <option value="cli">Codex CLI (ChatGPT subscription)</option>
+        </select>
+        {settings.selectedTransport === 'cli' && (
+          <p className="text-[10px] text-gray-600 mt-1">Requires Codex CLI installed and logged in via ChatGPT account</p>
+        )}
       </Field>
 
-      <Field label="API Key">
-        <input
-          type="password"
-          value={settings.apiKey || ''}
-          onChange={(e) => onChange({ ...settings, apiKey: e.target.value })}
-          placeholder="sk-proj-..."
-          className="input-field"
-        />
-      </Field>
+      {settings.selectedTransport === 'api' && (
+        <Field label="API Key">
+          <input
+            type="password"
+            value={settings.apiKey || ''}
+            onChange={(e) => onChange({ ...settings, apiKey: e.target.value })}
+            placeholder="sk-proj-..."
+            className="input-field"
+          />
+        </Field>
+      )}
 
       <Field label="Model">
         <select

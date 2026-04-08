@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { ClaudeCodeService } from './claude-code-service';
+import { CodexCliService } from './codex-cli-service';
 
 // ============================================================================
 // Transport Adapter — abstraction over API / CLI execution paths
@@ -303,4 +304,173 @@ export class OpenAIApiAdapter implements TransportAdapter {
       return response.choices[0]?.message?.content || '';
     }
   }
+}
+
+// ============================================================================
+// Codex CLI Adapter — delegates to locally installed OpenAI Codex CLI
+//
+// Uses: codex exec --json --ephemeral --full-auto --model MODEL -C DIR "prompt"
+//
+// Codex CLI has no --system-prompt flag, so we prepend the system prompt
+// to the user prompt.
+// ============================================================================
+
+export class CodexCliAdapter implements TransportAdapter {
+  constructor(
+    _cli: CodexCliService, // kept for future use (e.g. auth checks)
+    private model: string,
+    private cwd: string,
+  ) {}
+
+  async ask(
+    systemPrompt: string,
+    messages: TransportMessage[],
+    onStream?: (chunk: string) => void,
+  ): Promise<string> {
+    // Codex CLI has no system-prompt flag — prepend it to the prompt
+    const userPrompt = this.buildPrompt(messages);
+    const fullPrompt = `## System Instructions\n${systemPrompt}\n\n## Task\n${userPrompt}`;
+
+    return this.spawnCodex(fullPrompt, onStream);
+  }
+
+  private spawnCodex(
+    prompt: string,
+    onStream?: (chunk: string) => void,
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const args = [
+        'exec',
+        '--json',
+        '--ephemeral',
+        '--sandbox', 'read-only',
+        '-a', 'never',
+        '--model', this.model,
+        '-C', this.cwd,
+      ];
+
+      // Pipe via stdin for long prompts to avoid ARG_MAX
+      const useStdin = Buffer.byteLength(prompt, 'utf8') > 100000;
+      if (!useStdin) {
+        args.push(prompt);
+      }
+
+      const proc = spawn('codex', args, {
+        env: { ...process.env, FORCE_COLOR: '0' },
+        timeout: 180000,
+        stdio: useStdin ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
+      });
+
+      if (useStdin && proc.stdin) {
+        proc.stdin.write(prompt);
+        proc.stdin.end();
+      }
+
+      let fullText = '';
+      let stderr = '';
+      let lineBuffer = '';
+
+      proc.stdout?.on('data', (data: Buffer) => {
+        lineBuffer += data.toString();
+        const lines = lineBuffer.split('\n');
+        lineBuffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+
+            // Extract text from item.completed events with agent_message type
+            if (event.type === 'item.completed' && event.item) {
+              const item = event.item;
+              if (item.type === 'agent_message' || item.type === 'assistant_message') {
+                const text = extractItemText(item);
+                if (text) {
+                  fullText += text;
+                  onStream?.(text);
+                }
+              }
+            }
+
+            // Handle errors
+            if (event.type === 'error') {
+              stderr += event.message || 'Unknown error';
+            }
+          } catch {
+            // Not valid JSON — ignore
+          }
+        }
+      });
+
+      proc.stderr?.on('data', (data: Buffer) => {
+        // Codex CLI prints status info to stderr — ignore non-errors
+        const text = data.toString();
+        if (!text.includes('Reading additional input') && !text.includes('codex-cli')) {
+          stderr += text;
+        }
+      });
+
+      proc.on('close', (code: number | null) => {
+        // Process remaining buffer
+        if (lineBuffer.trim()) {
+          try {
+            const event = JSON.parse(lineBuffer);
+            if (event.type === 'item.completed' && event.item) {
+              const item = event.item;
+              if (item.type === 'agent_message' || item.type === 'assistant_message') {
+                const text = extractItemText(item);
+                if (text) {
+                  fullText += text;
+                  onStream?.(text);
+                }
+              }
+            }
+          } catch {
+            // Ignore
+          }
+        }
+
+        if (code === 0 || fullText) {
+          resolve(fullText);
+        } else {
+          reject(new Error(`Codex CLI exited with code ${code}: ${stderr}`));
+        }
+      });
+
+      proc.on('error', (err: Error) => {
+        reject(new Error(`Codex CLI spawn error: ${err.message}`));
+      });
+    });
+  }
+
+  private buildPrompt(messages: TransportMessage[]): string {
+    if (messages.length === 1) {
+      return messages[0].content;
+    }
+
+    const parts: string[] = [];
+    for (const msg of messages) {
+      const label = msg.role === 'user' ? 'User' : 'Assistant';
+      parts.push(`[${label}]\n${msg.content}`);
+    }
+    return parts.join('\n\n');
+  }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/** Extract text from a Codex CLI item — handles both flat and nested content formats */
+function extractItemText(item: any): string {
+  // Format 1: item.text (flat)
+  if (typeof item.text === 'string') return item.text;
+  // Format 2: item.content[] array (OpenAI Responses API style)
+  if (Array.isArray(item.content)) {
+    return item.content
+      .filter((c: any) => c.type === 'text' || c.type === 'output_text')
+      .map((c: any) => c.text || '')
+      .join('');
+  }
+  return '';
 }

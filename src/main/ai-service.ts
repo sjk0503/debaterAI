@@ -18,7 +18,9 @@ import {
   ClaudeApiAdapter,
   ClaudeCliAdapter,
   OpenAIApiAdapter,
+  CodexCliAdapter,
 } from './transport-adapter';
+import { CodexCliService } from './codex-cli-service';
 
 const store = new Store({
   defaults: {
@@ -59,18 +61,21 @@ export class AIService {
   private claude: Anthropic | null = null;
   private openai: OpenAI | null = null;
   private claudeCode: ClaudeCodeService;
+  private codexCli: CodexCliService;
   private projectPath: string = '';
-  private cachedCliStatus: CliStatus = 'error';
+  private cachedClaudeCliStatus: CliStatus = 'error';
+  private cachedCodexCliStatus: CliStatus = 'error';
 
-  constructor(claudeCode?: ClaudeCodeService) {
+  constructor(claudeCode?: ClaudeCodeService, codexCli?: CodexCliService) {
     this.claudeCode = claudeCode || new ClaudeCodeService();
+    this.codexCli = codexCli || new CodexCliService();
     this.initClients();
-    // Pre-check CLI status asynchronously
-    this.refreshCliStatus();
+    this.refreshCliStatuses();
   }
 
-  private async refreshCliStatus() {
-    this.cachedCliStatus = await this.getClaudeCliStatus();
+  private async refreshCliStatuses() {
+    this.cachedClaudeCliStatus = await this.getClaudeCliStatus();
+    this.cachedCodexCliStatus = await this.getCodexCliStatus();
   }
 
   setProjectPath(path: string) {
@@ -139,7 +144,14 @@ export class AIService {
   private getCodexAdapter(): TransportAdapter {
     const settings = this.getSettings();
 
-    // Codex is API-only for now
+    if (settings.codex.selectedTransport === 'cli') {
+      return new CodexCliAdapter(
+        this.codexCli,
+        settings.codex.model,
+        this.projectPath || process.cwd(),
+      );
+    }
+
     if (!this.openai) {
       throw new Error('OpenAI not configured. Add API key in settings.');
     }
@@ -213,15 +225,36 @@ export class AIService {
       };
     }
 
-    const codexStatus: ProviderStatus = {
-      provider: 'codex',
-      selectedTransport: 'api',
-      supportedTransports: ['api'],
-      ready: !!settings.codex.apiKey,
-      status: settings.codex.apiKey ? 'configured' : 'needsKey',
-      detail: settings.codex.apiKey ? 'API key configured' : 'API key required',
-      modelLabel: getModel(settings.codex.model)?.name,
-    };
+    let codexStatus: ProviderStatus;
+    if (settings.codex.selectedTransport === 'cli') {
+      const cliStatus = await this.getCodexCliStatus();
+      this.cachedCodexCliStatus = cliStatus;
+      codexStatus = {
+        provider: 'codex',
+        selectedTransport: 'cli',
+        supportedTransports: ['api', 'cli'],
+        ready: cliStatus === 'configured',
+        status: cliStatus === 'configured' ? 'configured'
+          : cliStatus === 'notInstalled' ? 'needsCliInstall'
+          : cliStatus === 'notLoggedIn' ? 'needsCliLogin'
+          : 'error',
+        detail: cliStatus === 'configured' ? 'Codex CLI ready'
+          : cliStatus === 'notInstalled' ? 'Codex CLI not installed'
+          : cliStatus === 'notLoggedIn' ? 'Run "codex" in terminal to log in'
+          : 'CLI error',
+        modelLabel: getModel(settings.codex.model)?.name,
+      };
+    } else {
+      codexStatus = {
+        provider: 'codex',
+        selectedTransport: 'api',
+        supportedTransports: ['api', 'cli'],
+        ready: !!settings.codex.apiKey,
+        status: settings.codex.apiKey ? 'configured' : 'needsKey',
+        detail: settings.codex.apiKey ? 'API key configured' : 'API key required',
+        modelLabel: getModel(settings.codex.model)?.name,
+      };
+    }
 
     return { claude: claudeStatus, codex: codexStatus };
   }
@@ -237,15 +270,31 @@ export class AIService {
     }
   }
 
+  private async getCodexCliStatus(): Promise<CliStatus> {
+    try {
+      const available = await this.codexCli.isAvailable();
+      if (!available) return 'notInstalled';
+      // Codex CLI auth is checked via a test exec — skip heavy check,
+      // assume configured if binary exists (real errors surface at exec time)
+      return 'configured';
+    } catch {
+      return 'error';
+    }
+  }
+
   isClaudeReady(): boolean {
     const settings = this.getSettings();
     if (settings.claude.selectedTransport === 'cli') {
-      return this.cachedCliStatus === 'configured';
+      return this.cachedClaudeCliStatus === 'configured';
     }
     return this.claude !== null;
   }
 
   isCodexReady(): boolean {
+    const settings = this.getSettings();
+    if (settings.codex.selectedTransport === 'cli') {
+      return this.cachedCodexCliStatus === 'configured';
+    }
     return this.openai !== null;
   }
 }
