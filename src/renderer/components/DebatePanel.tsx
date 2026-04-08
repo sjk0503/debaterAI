@@ -87,6 +87,9 @@ export function DebatePanel({
       return;
     }
 
+    // Ignore IME composition events (Korean/Japanese/Chinese input)
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
     // Enter to send (no modifier), Shift+Enter for newline
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
