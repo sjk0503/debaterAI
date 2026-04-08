@@ -155,9 +155,14 @@ export default function App() {
       const meta = await window.api.sessionGetMeta(sessionId);
       if (meta?.mode) setSelectedMode(meta.mode as DebateMode);
       if (meta?.projectPath) setProjectPath(meta.projectPath);
-    } catch (err) {
+    } catch (err: any) {
       console.error('[Session] Failed to load session:', err);
-      setMessages([]);
+      setMessages([{
+        id: `err-${Date.now()}`,
+        role: 'system' as const,
+        content: `세션 로드 실패: ${err?.message || String(err)}`,
+        timestamp: Date.now(),
+      }]);
       setStatus('idle');
     }
   };
