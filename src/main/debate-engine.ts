@@ -469,11 +469,6 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
       timestamp: Date.now(),
     }, debateId);
 
-    // Auto-checkpoint
-    try {
-      await this.checkpointService.create(session.projectPath, `pre-agent: ${session.prompt.slice(0, 50)}`);
-    } catch {}
-
     const settings = this.ai.getSettings();
     const model = agent === 'claude' ? settings.claude.model : settings.codex.model;
     const effort = agent === 'claude' ? settings.claude.effort : undefined;
@@ -520,6 +515,29 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
           this.agentEventCallback?.(event);
         },
       });
+
+      // After const result = await this.agentRuntime.spawn(...)
+      if (result.status === 'cancelled') {
+        this.setStatus(debateId, 'idle');
+        this.emit({
+          id: uuidv4(),
+          role: 'system',
+          content: '토론이 중단되었습니다.',
+          timestamp: Date.now(),
+        }, debateId);
+        return;
+      }
+
+      if (result.status === 'error') {
+        this.setStatus(debateId, 'error');
+        this.emit({
+          id: uuidv4(),
+          role: 'system',
+          content: `Agent error (exit code ${result.exitCode})`,
+          timestamp: Date.now(),
+        }, debateId);
+        return;
+      }
 
       msg.filesChanged = result.filesChanged;
       msg.toolsUsed = result.toolsUsed;
@@ -568,10 +586,6 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
 
     this.setStatus(debateId, 'coding');
 
-    try {
-      await this.checkpointService.create(session.projectPath, `pre-consensus: ${session.prompt.slice(0, 50)}`);
-    } catch {}
-
     const lastClaudeMsg = [...session.messages].reverse().find(m => m.role === 'claude');
     const lastCodexMsg = [...session.messages].reverse().find(m => m.role === 'codex');
 
@@ -618,6 +632,29 @@ Implement this directly in the project. Read relevant files, make the changes, a
           this.agentEventCallback?.(event);
         },
       });
+
+      // After const result = await this.agentRuntime.spawn(...)
+      if (result.status === 'cancelled') {
+        this.setStatus(debateId, 'idle');
+        this.emit({
+          id: uuidv4(),
+          role: 'system',
+          content: '토론이 중단되었습니다.',
+          timestamp: Date.now(),
+        }, debateId);
+        return;
+      }
+
+      if (result.status === 'error') {
+        this.setStatus(debateId, 'error');
+        this.emit({
+          id: uuidv4(),
+          role: 'system',
+          content: `Agent error (exit code ${result.exitCode})`,
+          timestamp: Date.now(),
+        }, debateId);
+        return;
+      }
 
       msg.filesChanged = result.filesChanged;
       msg.toolsUsed = result.toolsUsed;
@@ -712,13 +749,7 @@ Provide your feedback. Agree if the approach is solid, or suggest specific impro
     if (match) {
       return match[1].toLowerCase() as Agreement;
     }
-    const lower = response.toLowerCase();
-    if (lower.includes('i agree') || lower.includes('looks good') || lower.includes('solid approach')) {
-      return 'agree';
-    }
-    if (lower.includes('disagree') || lower.includes('instead') || lower.includes('better approach')) {
-      return 'disagree';
-    }
+    // No marker found — treat as unknown/partial (don't guess from keywords)
     return 'partial';
   }
 

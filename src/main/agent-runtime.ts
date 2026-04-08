@@ -8,7 +8,7 @@
 
 import { spawn, ChildProcess, execSync } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
-import { AgentEvent, AgentProvider, createAgentEvent } from '../shared/agent-events';
+import { AgentEvent, AgentProvider, AgentTerminalStatus, createAgentEvent } from '../shared/agent-events';
 import { ClaudeStreamParser } from './stream-parsers/claude-stream-parser';
 import { CodexStreamParser } from './stream-parsers/codex-stream-parser';
 
@@ -26,6 +26,7 @@ export interface AgentSpawnOptions {
 export interface AgentRunResult {
   agentId: string;
   exitCode: number;
+  status: AgentTerminalStatus;
   fullText: string;
   filesChanged: string[];
   toolsUsed: string[];
@@ -42,6 +43,7 @@ interface AgentRun {
 
 export class AgentRuntime {
   private runs: Map<string, AgentRun> = new Map();
+  private cancelledSet: Set<string> = new Set();
   private claudeBin: string | null = null;
   private codexBin: string | null = null;
 
@@ -139,11 +141,20 @@ export class AgentRuntime {
 
       proc.on('close', (code: number | null) => {
         parser.flush();
+        const isCancelled = this.cancelledSet.has(agentId);
         this.runs.delete(agentId);
+        this.cancelledSet.delete(agentId);
+
+        const status: AgentTerminalStatus = isCancelled
+          ? 'cancelled'
+          : code === 0
+            ? 'success'
+            : 'error';
 
         const result: AgentRunResult = {
           agentId,
           exitCode: code ?? 1,
+          status,
           fullText: parser.getFullText(),
           filesChanged: parser.getFilesChanged(),
           toolsUsed: parser.getToolsUsed(),
@@ -153,6 +164,7 @@ export class AgentRuntime {
         opts.onEvent(createAgentEvent('agent_done', agentId, 'claude', {
           kind: 'agent_done',
           exitCode: result.exitCode,
+          status,
           totalText: result.fullText,
           filesChanged: result.filesChanged,
           toolsUsed: result.toolsUsed,
@@ -215,11 +227,20 @@ export class AgentRuntime {
 
       proc.on('close', (code: number | null) => {
         parser.flush();
+        const isCancelled = this.cancelledSet.has(agentId);
         this.runs.delete(agentId);
+        this.cancelledSet.delete(agentId);
+
+        const status: AgentTerminalStatus = isCancelled
+          ? 'cancelled'
+          : code === 0
+            ? 'success'
+            : 'error';
 
         const result: AgentRunResult = {
           agentId,
           exitCode: code ?? 1,
+          status,
           fullText: parser.getFullText(),
           filesChanged: parser.getFilesChanged(),
           toolsUsed: parser.getToolsUsed(),
@@ -229,6 +250,7 @@ export class AgentRuntime {
         opts.onEvent(createAgentEvent('agent_done', agentId, 'codex', {
           kind: 'agent_done',
           exitCode: result.exitCode,
+          status,
           totalText: result.fullText,
           filesChanged: result.filesChanged,
           toolsUsed: result.toolsUsed,
@@ -252,20 +274,18 @@ export class AgentRuntime {
   /** Kill a running agent */
   kill(agentId: string): boolean {
     const run = this.runs.get(agentId);
-    if (run) {
-      run.process.kill('SIGTERM');
-      this.runs.delete(agentId);
-      return true;
-    }
-    return false;
+    if (!run) return false;
+    this.cancelledSet.add(agentId);
+    run.process.kill('SIGTERM');
+    return true;
   }
 
   /** Kill all running agents */
   killAll(): void {
-    for (const [, run] of this.runs) {
+    for (const [agentId, run] of this.runs) {
+      this.cancelledSet.add(agentId);
       run.process.kill('SIGTERM');
     }
-    this.runs.clear();
   }
 
   /** Check how many agents are running */

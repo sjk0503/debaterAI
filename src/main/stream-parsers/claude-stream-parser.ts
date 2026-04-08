@@ -142,8 +142,24 @@ export class ClaudeStreamParser {
             } else if (cls === 'bash' && input.command) {
               this.emit('bash_exec', { kind: 'bash_exec', command: input.command });
             }
+
+            // Close the tool lifecycle
+            this.emit('tool_use_done', {
+              kind: 'tool_use_done',
+              toolName: this.pendingToolUse.toolName,
+              toolId: this.pendingToolUse.toolId,
+              output: '',  // output comes from tool_result in later turns
+              isError: false,
+            });
           } catch {
-            // Failed to parse tool input
+            // Failed to parse — still close the tool lifecycle
+            this.emit('tool_use_done', {
+              kind: 'tool_use_done',
+              toolName: this.pendingToolUse.toolName,
+              toolId: this.pendingToolUse.toolId,
+              output: '',
+              isError: true,
+            });
           }
           this.pendingToolUse = null;
         }
