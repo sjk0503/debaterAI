@@ -62,6 +62,21 @@ export function reconstructMessages(events: SessionEvent[]): ReconstructResult {
         });
         break;
 
+      case 'debate_message': {
+        flushAgent();
+        const dm = event.data as any;
+        messages.push({
+          id: `reconstructed-${messages.length}`,
+          role: dm.role || 'claude',
+          content: dm.content || '',
+          timestamp: event.timestamp,
+          round: dm.round || undefined,
+          agreement: dm.agreement || undefined,
+        });
+        if (dm.round) currentRound = dm.round;
+        break;
+      }
+
       case 'agent_event': {
         const agentEvent = (event.data as any)?.event;
         if (!agentEvent) break;

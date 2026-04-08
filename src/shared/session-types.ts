@@ -10,6 +10,7 @@ import { DebateMode, DebateStatus, Agreement } from './types';
 export type SessionEventType =
   | 'session_start'
   | 'user_message'
+  | 'debate_message'
   | 'agent_event'
   | 'status_change'
   | 'consensus'
@@ -26,6 +27,7 @@ export interface SessionEvent {
 export type SessionEventData =
   | { kind: 'session_start'; prompt: string; projectPath: string; mode: DebateMode }
   | { kind: 'user_message'; content: string }
+  | { kind: 'debate_message'; role: 'claude' | 'codex'; content: string; round?: number; agreement?: string }
   | { kind: 'agent_event'; event: AgentEvent }
   | { kind: 'status_change'; status: DebateStatus }
   | { kind: 'consensus'; agreement: Agreement; round: number; decidedBy: string }

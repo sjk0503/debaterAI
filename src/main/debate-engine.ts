@@ -65,12 +65,15 @@ export class DebateEngine {
   /** Persist a completed agent message (called once after streaming finishes) */
   private persistAgentMessage(sessionId: string, msg: DebateMessage) {
     this.sessionStore.append(sessionId, {
-      type: 'system_message',
+      type: 'debate_message' as any,
       timestamp: msg.timestamp,
       data: {
-        kind: 'system_message',
-        content: `[${msg.role}${msg.round ? ` round ${msg.round}` : ''}] ${msg.content}`,
-      },
+        kind: 'debate_message',
+        role: msg.role as 'claude' | 'codex',
+        content: msg.content,
+        round: msg.round,
+        agreement: msg.agreement,
+      } as any,
     });
   }
 
