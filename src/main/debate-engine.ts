@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { AIService } from './ai-service';
 import { SessionStore } from './session-store';
+import { CheckpointService } from './checkpoint-service';
 import { buildSystemPrompt } from './system-prompt-builder';
 import {
   DebateSession,
@@ -18,9 +19,11 @@ export class DebateEngine {
   private messageCallback?: (msg: DebateMessage) => void;
   private statusCallback?: (status: { debateId: string; status: DebateStatus }) => void;
   private sessionStore: SessionStore;
+  private checkpointService: CheckpointService;
 
   constructor(private ai: AIService, sessionStore?: SessionStore) {
     this.sessionStore = sessionStore || new SessionStore();
+    this.checkpointService = new CheckpointService();
   }
 
   onMessage(cb: (msg: DebateMessage) => void) {
@@ -582,6 +585,14 @@ Output ALL files needed for the implementation. No explanations, just code files
     }
 
     const codeFiles = this.parseCodeFiles(artifactMsg.content, session.projectPath);
+
+    // Auto-checkpoint before applying — enables rollback via /rollback
+    try {
+      await this.checkpointService.create(session.projectPath, `pre-apply: ${session.prompt.slice(0, 50)}`);
+    } catch {
+      // Not a git repo or git not available — continue without checkpoint
+    }
+
     const fs = await import('fs/promises');
     const path = await import('path');
     const appliedFiles: string[] = [];
