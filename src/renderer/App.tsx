@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { DebatePanel } from './components/DebatePanel';
 import { FileExplorer } from './components/FileExplorer';
+import { SessionList } from './components/SessionList';
 import { CodeView } from './components/CodeView';
 import { SettingsModal } from './components/SettingsModal';
 import { PermissionModal } from './components/PermissionModal';
@@ -58,6 +59,9 @@ export default function App() {
   const [selectedMode, setSelectedMode] = useState<DebateMode>('debate');
   const [permissionReq, setPermissionReq] = useState<any>(null);
   const [settingsVersion, setSettingsVersion] = useState(0);
+  const [sidebarTab, setSidebarTab] = useState<'files' | 'sessions'>('sessions');
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [sessionRefresh, setSessionRefresh] = useState(0);
 
   useEffect(() => {
     const cleanupMsg = window.api?.onDebateMessage((msg) => {
@@ -74,6 +78,10 @@ export default function App() {
 
     const cleanupStatus = window.api?.onDebateStatus((s) => {
       setStatus(s.status);
+      // Refresh session list when debate finishes
+      if (s.status === 'done' || s.status === 'error') {
+        setSessionRefresh((v) => v + 1);
+      }
     });
 
     const cleanupPerm = window.api?.onPermissionRequest((req) => {
@@ -191,31 +199,63 @@ export default function App() {
             className="w-56 flex-shrink-0 flex flex-col"
             style={{ borderRight: '1px solid var(--border)', background: 'var(--bg-1)' }}
           >
-            {/* Project selector */}
+            {/* Tab selector: Sessions / Files */}
             <div
-              className="px-3 py-2 flex items-center justify-between"
+              className="px-1 py-1 flex items-center gap-1"
               style={{ borderBottom: '1px solid var(--border-subtle)' }}
             >
-              <span className="text-xs font-medium" style={{ color: 'var(--text-3)', letterSpacing: '0.05em' }}>
-                EXPLORER
-              </span>
               <button
-                onClick={handleOpenDirectory}
-                className="no-drag px-1.5 py-0.5 rounded text-xs transition"
-                style={{ color: 'var(--text-3)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-1)')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-3)')}
-                title="Open Folder"
+                onClick={() => setSidebarTab('sessions')}
+                className="flex-1 text-xs py-1 rounded transition"
+                style={{
+                  background: sidebarTab === 'sessions' ? 'var(--bg-3)' : 'transparent',
+                  color: sidebarTab === 'sessions' ? 'var(--text-1)' : 'var(--text-3)',
+                }}
               >
-                Open
+                Sessions
               </button>
+              <button
+                onClick={() => setSidebarTab('files')}
+                className="flex-1 text-xs py-1 rounded transition"
+                style={{
+                  background: sidebarTab === 'files' ? 'var(--bg-3)' : 'transparent',
+                  color: sidebarTab === 'files' ? 'var(--text-1)' : 'var(--text-3)',
+                }}
+              >
+                Files
+              </button>
+              {sidebarTab === 'files' && (
+                <button
+                  onClick={handleOpenDirectory}
+                  className="no-drag px-1.5 py-0.5 rounded text-xs transition"
+                  style={{ color: 'var(--text-3)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-1)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-3)')}
+                  title="Open Folder"
+                >
+                  +
+                </button>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto">
-              <FileExplorer
-                projectPath={projectPath}
-                onFileSelect={handleFileSelect}
-                selectedFile={selectedFile}
-              />
+              {sidebarTab === 'sessions' ? (
+                <SessionList
+                  currentSessionId={currentSessionId}
+                  onSelectSession={(id) => setCurrentSessionId(id)}
+                  onDeleteSession={(id) => {
+                    (window.api as any).sessionDelete?.(id);
+                    setSessionRefresh((v) => v + 1);
+                    if (currentSessionId === id) setCurrentSessionId(null);
+                  }}
+                  refreshTrigger={sessionRefresh}
+                />
+              ) : (
+                <FileExplorer
+                  projectPath={projectPath}
+                  onFileSelect={handleFileSelect}
+                  selectedFile={selectedFile}
+                />
+              )}
             </div>
           </div>
         )}

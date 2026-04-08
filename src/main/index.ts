@@ -79,6 +79,26 @@ function setupIPC() {
     return { success: true };
   });
 
+  // ============================================================================
+  // Session persistence
+  // ============================================================================
+  ipcMain.handle('session:list', async () => {
+    return debateEngine?.getSessionStore().list() ?? [];
+  });
+
+  ipcMain.handle('session:load', async (_event, { sessionId }) => {
+    return debateEngine?.getSessionStore().readEvents(sessionId) ?? [];
+  });
+
+  ipcMain.handle('session:getMeta', async (_event, { sessionId }) => {
+    return debateEngine?.getSessionStore().getMeta(sessionId);
+  });
+
+  ipcMain.handle('session:delete', async (_event, { sessionId }) => {
+    debateEngine?.getSessionStore().delete(sessionId);
+    return { success: true };
+  });
+
   // Readiness check — single aggregated IPC
   ipcMain.handle('app:getReadiness', async (_event, { projectPath }) => {
     if (!debateEngine) return null;

@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeAllListeners('agent:event');
   },
 
+  // ── Sessions ────────────────────────────────────────────────────────────
+  sessionList: () => ipcRenderer.invoke('session:list'),
+  sessionLoad: (sessionId: string) => ipcRenderer.invoke('session:load', { sessionId }),
+  sessionGetMeta: (sessionId: string) => ipcRenderer.invoke('session:getMeta', { sessionId }),
+  sessionDelete: (sessionId: string) => ipcRenderer.invoke('session:delete', { sessionId }),
+
   // ── App Readiness ────────────────────────────────────────────────────────
   getReadiness: (projectPath: string) =>
     ipcRenderer.invoke('app:getReadiness', { projectPath }),

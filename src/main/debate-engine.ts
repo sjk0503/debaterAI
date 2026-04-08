@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { AIService } from './ai-service';
+import { SessionStore } from './session-store';
 import {
   DebateSession,
   DebateMessage,
@@ -51,8 +52,11 @@ export class DebateEngine {
   private sessions: Map<string, DebateSession> = new Map();
   private messageCallback?: (msg: DebateMessage) => void;
   private statusCallback?: (status: { debateId: string; status: DebateStatus }) => void;
+  private sessionStore: SessionStore;
 
-  constructor(private ai: AIService) {}
+  constructor(private ai: AIService, sessionStore?: SessionStore) {
+    this.sessionStore = sessionStore || new SessionStore();
+  }
 
   onMessage(cb: (msg: DebateMessage) => void) {
     this.messageCallback = cb;
@@ -62,14 +66,42 @@ export class DebateEngine {
     this.statusCallback = cb;
   }
 
-  private emit(msg: DebateMessage) {
+  private emit(msg: DebateMessage, sessionId?: string) {
     this.messageCallback?.(msg);
+    // Persist to session store
+    if (sessionId) {
+      if (msg.role === 'system') {
+        this.sessionStore.append(sessionId, {
+          type: 'system_message',
+          timestamp: msg.timestamp,
+          data: { kind: 'system_message', content: msg.content },
+        });
+      } else if (msg.role === 'user') {
+        this.sessionStore.append(sessionId, {
+          type: 'user_message',
+          timestamp: msg.timestamp,
+          data: { kind: 'user_message', content: msg.content },
+        });
+      }
+      // Agent messages are persisted via agent events in the runtime layer
+    }
   }
 
   private setStatus(debateId: string, status: DebateStatus) {
     const session = this.sessions.get(debateId);
     if (session) session.status = status;
     this.statusCallback?.({ debateId, status });
+    // Persist status change
+    this.sessionStore.append(debateId, {
+      type: 'status_change',
+      timestamp: Date.now(),
+      data: { kind: 'status_change', status },
+    });
+  }
+
+  /** Get the session store for IPC access */
+  getSessionStore(): SessionStore {
+    return this.sessionStore;
   }
 
   /**
@@ -124,16 +156,23 @@ export class DebateEngine {
   /**
    * 토론 시작
    */
-  async startDebate(prompt: string, projectPath: string, projectContext?: string): Promise<string> {
-    const debateId = uuidv4();
+  async startDebate(prompt: string, projectPath: string, projectContext?: string, mode?: string): Promise<string> {
+    const resolvedMode = (mode as any) || this.ai.getSettings().debate.preferredMode;
     const settings = this.ai.getSettings();
+
+    // Create persistent session
+    const debateId = this.sessionStore.create({
+      prompt,
+      projectPath,
+      mode: resolvedMode,
+    });
 
     const session: DebateSession = {
       id: debateId,
       prompt,
       projectPath,
       projectContext: projectContext || '',
-      mode: settings.debate.preferredMode,
+      mode: resolvedMode,
       status: 'thinking',
       messages: [],
       rounds: [],
