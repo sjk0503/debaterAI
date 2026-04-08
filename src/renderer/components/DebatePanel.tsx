@@ -236,32 +236,60 @@ export function DebatePanel({
       />
 
       {/* Apply Code Banner — shown when code generation is done */}
-      {status === 'done' && messages.some(m => (m.role === 'claude' || m.role === 'codex') && m.content.includes('```')) && (
-        <div
-          className="flex items-center justify-between px-4 py-2 flex-shrink-0"
-          style={{ background: 'rgba(16,185,129,0.1)', borderTop: '1px solid rgba(16,185,129,0.3)' }}
-        >
-          <span className="text-xs" style={{ color: '#10b981' }}>
-            코드 생성 완료 — 프로젝트에 적용하시겠습니까?
-          </span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => onShowDiff?.()}
-              className="text-xs px-3 py-1 rounded transition"
-              style={{ background: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+      {status === 'done' && (() => {
+        const lastAgentMsg = [...messages].reverse().find(
+          m => (m.role === 'claude' || m.role === 'codex')
+        );
+
+        // Agent mode: files already modified directly
+        if (lastAgentMsg?.agentEvents?.length) {
+          const fileCount = lastAgentMsg.filesChanged?.length || 0;
+          if (fileCount === 0) return null;
+          return (
+            <div
+              className="flex items-center justify-between px-4 py-2 flex-shrink-0"
+              style={{ background: 'rgba(16,185,129,0.1)', borderTop: '1px solid rgba(16,185,129,0.3)' }}
             >
-              Diff 보기
-            </button>
-            <button
-              onClick={() => onApplyCode?.()}
-              className="text-xs px-3 py-1 rounded font-medium transition"
-              style={{ background: '#10b981', color: 'white', border: 'none' }}
+              <span className="text-xs" style={{ color: '#10b981' }}>
+                Agent가 {fileCount}개 파일을 수정했습니다.
+              </span>
+              <button
+                onClick={() => onShowDiff?.()}
+                className="text-xs px-3 py-1 rounded font-medium transition"
+                style={{ background: '#10b981', color: 'white', border: 'none' }}
+              >
+                Diff 보기
+              </button>
+            </div>
+          );
+        }
+
+        // Text mode: show apply banner
+        if (lastAgentMsg?.content?.includes('```')) {
+          return (
+            <div
+              className="flex items-center justify-between px-4 py-2 flex-shrink-0"
+              style={{ background: 'rgba(16,185,129,0.1)', borderTop: '1px solid rgba(16,185,129,0.3)' }}
             >
-              코드 적용
-            </button>
-          </div>
-        </div>
-      )}
+              <span className="text-xs" style={{ color: '#10b981' }}>
+                코드 생성 완료 — 프로젝트에 적용하시겠습니까?
+              </span>
+              <div className="flex gap-2">
+                <button onClick={() => onShowDiff?.()} className="text-xs px-3 py-1 rounded transition"
+                  style={{ background: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}>
+                  Diff 보기
+                </button>
+                <button onClick={() => onApplyCode?.()} className="text-xs px-3 py-1 rounded font-medium transition"
+                  style={{ background: '#10b981', color: 'white', border: 'none' }}>
+                  코드 적용
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        return null;
+      })()}
 
       {/* Input */}
       <div

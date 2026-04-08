@@ -57,8 +57,8 @@ function setupIPC() {
   const searchService = new SearchService();
   const permissionService = new PermissionService();
   const sessionStore = new SessionStore();
-  debateEngine = new DebateEngine(aiService, sessionStore);
   agentRuntime = new AgentRuntime();
+  debateEngine = new DebateEngine(aiService, sessionStore, agentRuntime);
   orchestrator = new Orchestrator(agentRuntime, gitService, sessionStore);
   const checkpointService = new CheckpointService();
 
@@ -208,6 +208,9 @@ function setupIPC() {
   });
   debateEngine.onStatusChange((status) => {
     mainWindow?.webContents.send('debate:status', status);
+  });
+  debateEngine.onAgentEvent((event) => {
+    mainWindow?.webContents.send('agent:event', event);
   });
 
   ipcMain.handle('debate:start', async (_event, { prompt, projectPath, mode, sessionId }) => {

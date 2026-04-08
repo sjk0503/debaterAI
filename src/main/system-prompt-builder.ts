@@ -8,6 +8,7 @@ interface PromptContext {
   projectPath: string;
   projectContext: string;
   previousRounds: Array<{ claudeResponse: string; codexResponse: string; agreement: string }>;
+  agentMode?: boolean;
 }
 
 export function buildSystemPrompt(ctx: PromptContext): string {
@@ -121,7 +122,20 @@ ${codexResp}`);
   }
 
   // Section 6: Output Format
-  parts.push(`## Output Format
+  if (ctx.agentMode) {
+    parts.push(`## Execution Mode
+
+You are running as a FULL AGENT with direct access to the project at: ${ctx.projectPath}
+
+CRITICAL RULES:
+- Read files to understand the codebase BEFORE making changes
+- Edit or create files DIRECTLY using your tools — do NOT output code as text in your response
+- Run tests or build commands to verify your changes work
+- Keep your text responses brief — focus on DOING, not explaining
+- Your file operations, edits, and commands are shown to the user in real time
+- Do NOT dump entire file contents in your response — the user can see your file operations`);
+  } else {
+    parts.push(`## Output Format
 
 When proposing code CHANGES, use this format for each modified file:
 --- FILE: path/to/file.ts ---
@@ -134,6 +148,7 @@ IMPORTANT RULES:
 - Do NOT dump entire existing files — the user and other agents can already see them
 - For analysis/review tasks, describe the code structure in words, referencing file paths and function names
 - Keep responses focused and concise`);
+  }
 
   if (ctx.mode === 'debate') {
     parts.push(`## Agreement Signal

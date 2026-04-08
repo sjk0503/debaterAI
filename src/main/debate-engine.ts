@@ -3,6 +3,8 @@ import { AIService } from './ai-service';
 import { SessionStore } from './session-store';
 import { CheckpointService } from './checkpoint-service';
 import { buildSystemPrompt } from './system-prompt-builder';
+import { AgentRuntime } from './agent-runtime';
+import { AgentEvent } from '../shared/agent-events';
 import {
   DebateSession,
   DebateMessage,
@@ -20,10 +22,13 @@ export class DebateEngine {
   private statusCallback?: (status: { debateId: string; status: DebateStatus }) => void;
   private sessionStore: SessionStore;
   private checkpointService: CheckpointService;
+  private agentRuntime?: AgentRuntime;
+  private agentEventCallback?: (event: AgentEvent) => void;
 
-  constructor(private ai: AIService, sessionStore?: SessionStore) {
+  constructor(private ai: AIService, sessionStore?: SessionStore, agentRuntime?: AgentRuntime) {
     this.sessionStore = sessionStore || new SessionStore();
     this.checkpointService = new CheckpointService();
+    this.agentRuntime = agentRuntime;
   }
 
   onMessage(cb: (msg: DebateMessage) => void) {
@@ -32,6 +37,10 @@ export class DebateEngine {
 
   onStatusChange(cb: (status: { debateId: string; status: DebateStatus }) => void) {
     this.statusCallback = cb;
+  }
+
+  onAgentEvent(cb: (event: AgentEvent) => void) {
+    this.agentEventCallback = cb;
   }
 
   private emit(msg: DebateMessage, sessionId: string) {
@@ -192,12 +201,20 @@ export class DebateEngine {
     if (!session) return;
 
     if (session.mode === 'claude-only') {
-      await this.runSoloLoop(debateId, 'claude');
+      if (this.agentRuntime) {
+        await this.runAgentSoloLoop(debateId, 'claude');
+      } else {
+        await this.runSoloLoop(debateId, 'claude');
+      }
       return;
     }
 
     if (session.mode === 'codex-only') {
-      await this.runSoloLoop(debateId, 'codex');
+      if (this.agentRuntime) {
+        await this.runAgentSoloLoop(debateId, 'codex');
+      } else {
+        await this.runSoloLoop(debateId, 'codex');
+      }
       return;
     }
 
@@ -321,7 +338,7 @@ export class DebateEngine {
           timestamp: Date.now(),
           agreement: 'agree',
         }, debateId);
-        await this.generateCode(debateId);
+        await this.executeConsensus(debateId);
         return;
       }
 
@@ -345,11 +362,11 @@ export class DebateEngine {
       content: `⏰ 최대 라운드 도달 — Claude의 최종 제안으로 진행합니다.`,
       timestamp: Date.now(),
     }, debateId);
-    await this.generateCode(debateId);
+    await this.executeConsensus(debateId);
   }
 
   /**
-   * 솔로 모드 — 단일 AI만 사용하여 바로 코드 생성
+   * 솔로 모드 — 단일 AI만 사용하여 바로 코드 생성 (fallback: no agentRuntime)
    */
   private async runSoloLoop(debateId: string, agent: 'claude' | 'codex') {
     const session = this.sessions.get(debateId);
@@ -432,6 +449,207 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
     }, debateId);
   }
 
+  /**
+   * Agent solo mode — uses AgentRuntime CLI for real file edits
+   */
+  private async runAgentSoloLoop(debateId: string, agent: 'claude' | 'codex') {
+    const session = this.sessions.get(debateId);
+    if (!session || !this.agentRuntime) return;
+
+    session.currentRound = 1;
+    this.setStatus(debateId, 'debating');
+
+    const agentLabel = agent === 'claude' ? '🟣 Claude' : '🟢 Codex';
+    this.emit({
+      id: uuidv4(),
+      role: 'system',
+      content: `${agentLabel} Agent 모드로 실행합니다.`,
+      timestamp: Date.now(),
+    }, debateId);
+
+    // Auto-checkpoint
+    try {
+      await this.checkpointService.create(session.projectPath, `pre-agent: ${session.prompt.slice(0, 50)}`);
+    } catch {}
+
+    const settings = this.ai.getSettings();
+    const model = agent === 'claude' ? settings.claude.model : settings.codex.model;
+    const effort = agent === 'claude' ? settings.claude.effort : undefined;
+
+    const systemPrompt = buildSystemPrompt({
+      agent,
+      mode: session.mode,
+      round: 1,
+      maxRounds: 1,
+      projectPath: session.projectPath,
+      projectContext: session.projectContext,
+      previousRounds: [],
+      agentMode: true,
+    });
+
+    const msg: DebateMessage = {
+      id: uuidv4(),
+      role: agent === 'claude' ? 'claude' as const : 'codex' as const,
+      content: '',
+      timestamp: Date.now(),
+      round: 1,
+      agentEvents: [],
+      filesChanged: [],
+      toolsUsed: [],
+    };
+    this.emit(msg, debateId);
+
+    try {
+      const result = await this.agentRuntime.spawn({
+        prompt: session.prompt,
+        cwd: session.projectPath,
+        model,
+        provider: agent,
+        systemPrompt,
+        effort,
+        onEvent: (event: any) => {
+          if (event.data?.kind === 'text_delta') {
+            msg.content += event.data.text || '';
+          } else if (event.data?.kind === 'text_done') {
+            msg.content = event.data.fullText || msg.content;
+          }
+          msg.agentEvents!.push(event);
+          this.emit({ ...msg }, debateId);
+          this.agentEventCallback?.(event);
+        },
+      });
+
+      msg.filesChanged = result.filesChanged;
+      msg.toolsUsed = result.toolsUsed;
+      msg.content = result.fullText || msg.content;
+      session.messages.push(msg);
+      session.artifactMessageId = msg.id;
+
+      // Persist agent events to session
+      for (const event of msg.agentEvents!) {
+        this.sessionStore.append(debateId, {
+          type: 'agent_event',
+          timestamp: event.timestamp || Date.now(),
+          data: { kind: 'agent_event', event } as any,
+        });
+      }
+
+      this.setStatus(debateId, 'done');
+      const fileCount = result.filesChanged?.length || 0;
+      this.emit({
+        id: uuidv4(),
+        role: 'system',
+        content: `🎉 ${agentLabel} 작업 완료! ${fileCount > 0 ? `${fileCount}개 파일 수정됨.` : ''}`,
+        timestamp: Date.now(),
+      }, debateId);
+    } catch (err: any) {
+      this.setStatus(debateId, 'error');
+      this.emit({
+        id: uuidv4(),
+        role: 'system',
+        content: `Error: ${err.message}`,
+        timestamp: Date.now(),
+      }, debateId);
+    }
+  }
+
+  /**
+   * executeConsensus — uses AgentRuntime when available, falls back to generateCode
+   */
+  private async executeConsensus(debateId: string) {
+    const session = this.sessions.get(debateId);
+    if (!session) return;
+
+    if (!this.agentRuntime) {
+      return this.generateCode(debateId);  // fallback to text mode
+    }
+
+    this.setStatus(debateId, 'coding');
+
+    try {
+      await this.checkpointService.create(session.projectPath, `pre-consensus: ${session.prompt.slice(0, 50)}`);
+    } catch {}
+
+    const lastClaudeMsg = [...session.messages].reverse().find(m => m.role === 'claude');
+    const lastCodexMsg = [...session.messages].reverse().find(m => m.role === 'codex');
+
+    const consensusPrompt = `Implement the following based on the debate consensus.
+
+User request: "${session.prompt}"
+
+Agreed approach (Claude's final proposal):
+${(lastClaudeMsg?.content || '').slice(0, 4000)}
+
+Reviewer feedback (Codex):
+${(lastCodexMsg?.content || '').slice(0, 3000)}
+
+Implement this directly in the project. Read relevant files, make the changes, and verify your work.`;
+
+    const settings = this.ai.getSettings();
+
+    const msg: DebateMessage = {
+      id: uuidv4(),
+      role: 'claude',
+      content: '',
+      timestamp: Date.now(),
+      agentEvents: [],
+      filesChanged: [],
+      toolsUsed: [],
+    };
+    this.emit(msg, debateId);
+
+    try {
+      const result = await this.agentRuntime.spawn({
+        prompt: consensusPrompt,
+        cwd: session.projectPath,
+        model: settings.claude.model,
+        provider: 'claude',
+        effort: settings.claude.effort,
+        onEvent: (event: any) => {
+          if (event.data?.kind === 'text_delta') {
+            msg.content += event.data.text || '';
+          } else if (event.data?.kind === 'text_done') {
+            msg.content = event.data.fullText || msg.content;
+          }
+          msg.agentEvents!.push(event);
+          this.emit({ ...msg }, debateId);
+          this.agentEventCallback?.(event);
+        },
+      });
+
+      msg.filesChanged = result.filesChanged;
+      msg.toolsUsed = result.toolsUsed;
+      msg.content = result.fullText || msg.content;
+      session.messages.push(msg);
+      session.artifactMessageId = msg.id;
+
+      for (const event of msg.agentEvents!) {
+        this.sessionStore.append(debateId, {
+          type: 'agent_event',
+          timestamp: event.timestamp || Date.now(),
+          data: { kind: 'agent_event', event } as any,
+        });
+      }
+
+      this.setStatus(debateId, 'done');
+      const fileCount = result.filesChanged?.length || 0;
+      this.emit({
+        id: uuidv4(),
+        role: 'system',
+        content: `🎉 코드 구현 완료! ${fileCount > 0 ? `${fileCount}개 파일 수정됨.` : ''}`,
+        timestamp: Date.now(),
+      }, debateId);
+    } catch (err: any) {
+      this.setStatus(debateId, 'error');
+      this.emit({
+        id: uuidv4(),
+        role: 'system',
+        content: `Error: ${err.message}`,
+        timestamp: Date.now(),
+      }, debateId);
+    }
+  }
+
   private buildClaudePrompt(session: DebateSession, round: number): string {
     const ctx = session.projectContext || '';
     if (round === 1) {
@@ -498,6 +716,9 @@ Provide your feedback. Agree if the approach is solid, or suggest specific impro
     return 'partial';
   }
 
+  /**
+   * generateCode — text-only fallback used when agentRuntime is not available
+   */
   private async generateCode(debateId: string) {
     const session = this.sessions.get(debateId);
     if (!session) return;
@@ -569,6 +790,14 @@ Output ALL files needed for the implementation. No explanations, just code files
   async applyConsensus(debateId: string): Promise<{ success: boolean; files: string[]; errors: string[] }> {
     const session = this.sessions.get(debateId);
     if (!session) return { success: false, files: [], errors: ['Session not found'] };
+
+    // If agent mode was used, files are already applied
+    const artifactCheck = session.artifactMessageId
+      ? session.messages.find(m => m.id === session.artifactMessageId)
+      : undefined;
+    if (artifactCheck?.agentEvents?.length) {
+      return { success: true, files: artifactCheck.filesChanged || [], errors: [] };
+    }
 
     let artifactMsg: DebateMessage | undefined;
     if (session.artifactMessageId) {
