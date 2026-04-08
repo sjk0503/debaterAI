@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { DebateMessage } from '../../shared/types';
+import { DebateMessage, AppReadiness, ModeStatus } from '../../shared/types';
 import { MarkdownMessage } from './MarkdownMessage';
 
 interface Props {
@@ -8,10 +8,12 @@ interface Props {
   projectPath: string;
   onProjectPathChange: (path: string) => void;
   onOpenDirectory: () => void;
+  onOpenSettings: (tab?: string) => void;
 }
 
-export function DebatePanel({ messages, status, projectPath, onProjectPathChange, onOpenDirectory }: Props) {
+export function DebatePanel({ messages, status, projectPath, onProjectPathChange, onOpenDirectory, onOpenSettings }: Props) {
   const [input, setInput] = useState('');
+  const [readiness, setReadiness] = useState<AppReadiness | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isActive = status !== 'idle' && status !== 'done' && status !== 'error';
@@ -19,6 +21,11 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Fetch readiness on mount and when project changes
+  useEffect(() => {
+    window.api.getReadiness?.(projectPath).then(setReadiness).catch(() => {});
+  }, [projectPath, status]);
 
   const handleSubmit = async () => {
     if (!input.trim() || !projectPath.trim() || isActive) return;
@@ -51,20 +58,30 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full" style={{ color: 'var(--text-3)' }}>
-            <div className="mb-6 text-4xl font-bold tracking-tight" style={{ color: 'var(--text-2)' }}>
-              debaterAI
-            </div>
-            <p className="text-xs text-center max-w-xs leading-relaxed" style={{ color: 'var(--text-3)' }}>
-              Two AI agents debate every decision before writing a single line of code.
-            </p>
+          <ReadinessDashboard
+            readiness={readiness}
+            projectPath={projectPath}
+            onOpenDirectory={onOpenDirectory}
+            onOpenSettings={onOpenSettings}
+          />
+        )}
+
+        {/* Compact readiness strip when idle with messages */}
+        {messages.length > 0 && status === 'idle' && readiness && (
+          <div className="flex items-center gap-3 px-2 py-1.5 rounded text-xs" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
+            <StatusBadge ready={readiness.providers.claude.ready} label="Claude" />
+            <StatusBadge ready={readiness.providers.codex.ready} label="Codex" />
+            {readiness.modes.filter(m => m.enabled).length > 0 && (
+              <span style={{ color: 'var(--text-3)' }}>
+                {readiness.modes.filter(m => m.enabled).map(m => m.mode).join(' / ')}
+              </span>
+            )}
           </div>
         )}
 
         {messages.map((msg) => {
           const meta = roleMeta[msg.role] || roleMeta.system;
 
-          // System messages — 심플한 구분선
           if (msg.role === 'system') {
             return (
               <div key={msg.id} className="flex items-center gap-3 py-1">
@@ -79,12 +96,8 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
 
           return (
             <div key={msg.id} className="group">
-              {/* Header */}
               <div className="flex items-center gap-2 mb-1">
-                <span
-                  className="text-xs font-semibold"
-                  style={{ color: meta.color }}
-                >
+                <span className="text-xs font-semibold" style={{ color: meta.color }}>
                   {meta.label}
                 </span>
                 {msg.round && (
@@ -113,7 +126,6 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
                 )}
               </div>
 
-              {/* Content */}
               <div
                 className="rounded-md px-3 py-2.5 text-xs"
                 style={{
@@ -124,10 +136,7 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
               >
                 <MarkdownMessage
                   content={msg.content}
-                  isStreaming={
-                    isActive &&
-                    msg === messages[messages.length - 1]
-                  }
+                  isStreaming={isActive && msg === messages[messages.length - 1]}
                 />
               </div>
             </div>
@@ -141,7 +150,6 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
         className="flex-shrink-0 px-4 py-3"
         style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-1)' }}
       >
-        {/* Project path row */}
         <div className="flex items-center gap-2 mb-2">
           <span className="text-xs" style={{ color: 'var(--text-3)' }}>Project</span>
           <input
@@ -169,14 +177,13 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
           </button>
         </div>
 
-        {/* Input row */}
         <div className="flex gap-2 items-end">
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isActive ? 'Debating...' : 'Describe what to build... (⌘ Enter to start)'}
+            placeholder={isActive ? 'Debating...' : 'Describe what to build... (Cmd+Enter to start)'}
             rows={2}
             disabled={isActive}
             className="flex-1 text-xs rounded px-3 py-2 resize-none outline-none transition"
@@ -209,5 +216,185 @@ export function DebatePanel({ messages, status, projectPath, onProjectPathChange
         </div>
       </div>
     </div>
+  );
+}
+
+// ============================================================================
+// Readiness Dashboard — shown in empty state
+// ============================================================================
+
+function ReadinessDashboard({
+  readiness,
+  projectPath,
+  onOpenDirectory,
+  onOpenSettings,
+}: {
+  readiness: AppReadiness | null;
+  projectPath: string;
+  onOpenDirectory: () => void;
+  onOpenSettings: (tab?: string) => void;
+}) {
+  if (!readiness) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full" style={{ color: 'var(--text-3)' }}>
+        <div className="mb-6 text-4xl font-bold tracking-tight" style={{ color: 'var(--text-2)' }}>
+          debaterAI
+        </div>
+        <p className="text-xs text-center max-w-xs leading-relaxed" style={{ color: 'var(--text-3)' }}>
+          Two AI agents debate every decision before writing a single line of code.
+        </p>
+      </div>
+    );
+  }
+
+  const { project, providers, modes } = readiness;
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-6" style={{ color: 'var(--text-3)' }}>
+      <div className="text-3xl font-bold tracking-tight" style={{ color: 'var(--text-2)' }}>
+        debaterAI
+      </div>
+
+      {/* Status Cards */}
+      <div className="w-full max-w-sm space-y-2">
+        {/* Project Card */}
+        <ProviderCard
+          label="Project"
+          ready={project.ready}
+          detail={project.ready ? project.path.split('/').pop() || project.path : 'No project selected'}
+          action={!project.ready ? { label: 'Browse', onClick: onOpenDirectory } : undefined}
+        />
+
+        {/* Claude Card */}
+        <ProviderCard
+          label="Claude"
+          color="var(--claude)"
+          ready={providers.claude.ready}
+          detail={`${providers.claude.selectedTransport.toUpperCase()} · ${providers.claude.detail}`}
+          modelLabel={providers.claude.modelLabel}
+          action={!providers.claude.ready ? {
+            label: providers.claude.status === 'needsCliInstall' ? 'Install Guide'
+              : providers.claude.status === 'needsCliLogin' ? 'Login Guide'
+              : 'Configure',
+            onClick: () => onOpenSettings('claude'),
+          } : undefined}
+        />
+
+        {/* Codex Card */}
+        <ProviderCard
+          label="Codex"
+          color="var(--codex)"
+          ready={providers.codex.ready}
+          detail={`${providers.codex.selectedTransport.toUpperCase()} · ${providers.codex.detail}`}
+          modelLabel={providers.codex.modelLabel}
+          action={!providers.codex.ready ? {
+            label: 'Configure',
+            onClick: () => onOpenSettings('codex'),
+          } : undefined}
+        />
+      </div>
+
+      {/* Modes Row */}
+      <div className="flex gap-2">
+        {modes.map((m) => (
+          <ModeChip key={m.mode} mode={m} />
+        ))}
+      </div>
+
+      {/* Secondary CTA */}
+      <button
+        onClick={() => onOpenSettings()}
+        className="text-xs px-3 py-1.5 rounded transition"
+        style={{ color: 'var(--text-3)', border: '1px solid var(--border)' }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-3)'; }}
+      >
+        Open Settings
+      </button>
+    </div>
+  );
+}
+
+function ProviderCard({
+  label,
+  color,
+  ready,
+  detail,
+  modelLabel,
+  action,
+}: {
+  label: string;
+  color?: string;
+  ready: boolean;
+  detail: string;
+  modelLabel?: string;
+  action?: { label: string; onClick: () => void };
+}) {
+  return (
+    <div
+      className="flex items-center justify-between px-3 py-2 rounded"
+      style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <span
+          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+          style={{ background: ready ? '#10b981' : '#ef4444' }}
+        />
+        <span className="text-xs font-medium" style={{ color: color || 'var(--text-2)' }}>
+          {label}
+        </span>
+        <span className="text-xs truncate" style={{ color: 'var(--text-3)' }}>
+          {detail}
+        </span>
+        {modelLabel && (
+          <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--bg-3)', color: 'var(--text-3)' }}>
+            {modelLabel}
+          </span>
+        )}
+      </div>
+      {action && (
+        <button
+          onClick={action.onClick}
+          className="text-xs px-2 py-0.5 rounded flex-shrink-0 transition"
+          style={{ background: 'var(--accent)', color: 'white' }}
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ModeChip({ mode }: { mode: ModeStatus }) {
+  const labels: Record<string, string> = {
+    'debate': 'Debate',
+    'claude-only': 'Claude Only',
+    'codex-only': 'Codex Only',
+  };
+  return (
+    <div
+      className="text-xs px-2.5 py-1 rounded"
+      style={{
+        background: mode.enabled ? 'rgba(99,102,241,0.15)' : 'var(--bg-2)',
+        color: mode.enabled ? 'var(--accent)' : 'var(--text-3)',
+        border: `1px solid ${mode.enabled ? 'rgba(99,102,241,0.3)' : 'var(--border)'}`,
+        opacity: mode.enabled ? 1 : 0.5,
+      }}
+      title={mode.blockers.length > 0 ? mode.blockers.join(', ') : 'Ready'}
+    >
+      {labels[mode.mode] || mode.mode}
+    </div>
+  );
+}
+
+function StatusBadge({ ready, label }: { ready: boolean; label: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      <span
+        className="w-1.5 h-1.5 rounded-full"
+        style={{ background: ready ? '#10b981' : '#ef4444' }}
+      />
+      <span style={{ color: 'var(--text-3)' }}>{label}</span>
+    </span>
   );
 }

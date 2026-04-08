@@ -7,6 +7,7 @@ import { TerminalService } from './terminal-service';
 import { SearchService } from './search-service';
 import { PermissionService } from './permission-service';
 import { ClaudeCodeService } from './claude-code-service';
+import { AppReadiness, ReadinessAction } from '../shared/types';
 
 let mainWindow: BrowserWindow | null = null;
 let debateEngine: DebateEngine | null = null;
@@ -42,17 +43,64 @@ function createWindow() {
 
 // IPC Handlers
 function setupIPC() {
-  const aiService = new AIService();
+  const claudeCode = new ClaudeCodeService();
+  const aiService = new AIService(claudeCode);
   const gitService = new GitService();
   const terminalService = new TerminalService();
   const searchService = new SearchService();
   const permissionService = new PermissionService();
-  const claudeCode = new ClaudeCodeService();
   debateEngine = new DebateEngine(aiService);
+
+  // Readiness check — single aggregated IPC
+  ipcMain.handle('app:getReadiness', async (_event, { projectPath }) => {
+    if (!debateEngine) return null;
+    const providers = await aiService.getProviderStatus();
+    const modes = debateEngine.getEnabledModes();
+    const settings = aiService.getSettings();
+    const projectReady = !!projectPath;
+
+    // Compute primary action
+    let primaryAction: ReadinessAction | null = null;
+    if (!projectReady) {
+      primaryAction = { type: 'browseProject' };
+    } else if (!providers.claude.ready && !providers.codex.ready) {
+      primaryAction = { type: 'openSettings', tab: 'claude' };
+    } else {
+      const enabledMode = modes.find((m) => m.enabled);
+      if (enabledMode) {
+        primaryAction = { type: 'startMode', mode: enabledMode.mode };
+      } else {
+        primaryAction = { type: 'openSettings', tab: providers.claude.ready ? 'codex' : 'claude' };
+      }
+    }
+
+    const readiness: AppReadiness = {
+      project: { ready: projectReady, path: projectPath || '' },
+      providers,
+      modes,
+      preferredMode: settings.debate.preferredMode,
+      primaryAction,
+    };
+    return readiness;
+  });
+
+  // Validate before starting debate
+  ipcMain.handle('debate:validateStart', async () => {
+    if (!debateEngine) return { valid: false, error: 'Engine not initialized' };
+    const settings = aiService.getSettings();
+    return debateEngine.validateStart(settings.debate.preferredMode);
+  });
 
   // 토론 시작
   ipcMain.handle('debate:start', async (_event, { prompt, projectPath }) => {
     if (!debateEngine || !mainWindow) return;
+
+    // Validate first
+    const settings = aiService.getSettings();
+    const validation = debateEngine.validateStart(settings.debate.preferredMode);
+    if (!validation.valid) {
+      return { error: validation.error };
+    }
 
     debateEngine.onMessage((message) => {
       mainWindow?.webContents.send('debate:message', message);

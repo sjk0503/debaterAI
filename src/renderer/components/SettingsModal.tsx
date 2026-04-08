@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AISettings } from '../../shared/types';
+import { AISettings, ClaudeSettings, OpenAISettings, ReasoningEffort } from '../../shared/types';
 import { CLAUDE_MODELS, OPENAI_MODELS, ModelInfo } from '../../shared/models';
 
 interface Props {
@@ -44,7 +44,7 @@ export function SettingsModal({ onClose }: Props) {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#383838]">
-          <h2 className="text-lg font-bold">⚙️ Settings</h2>
+          <h2 className="text-lg font-bold">Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-white">✕</button>
         </div>
 
@@ -67,20 +67,14 @@ export function SettingsModal({ onClose }: Props) {
           {/* Tab Content */}
           <div className="flex-1 p-6 overflow-y-auto">
             {tab === 'claude' && (
-              <ProviderSettings
-                title="Claude (Anthropic)"
-                color="purple"
-                models={CLAUDE_MODELS}
+              <ClaudeProviderSettings
                 settings={settings.claude}
                 onChange={(claude) => setSettings({ ...settings, claude })}
               />
             )}
 
             {tab === 'codex' && (
-              <ProviderSettings
-                title="Codex / GPT (OpenAI)"
-                color="green"
-                models={OPENAI_MODELS}
+              <CodexProviderSettings
                 settings={settings.codex}
                 onChange={(codex) => setSettings({ ...settings, codex })}
               />
@@ -88,18 +82,19 @@ export function SettingsModal({ onClose }: Props) {
 
             {tab === 'debate' && (
               <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-300">⚔️ Debate Settings</h3>
+                <h3 className="text-sm font-bold text-gray-300">Debate Settings</h3>
 
-                <Field label="Mode">
+                <Field label="Preferred Mode">
                   <select
-                    value={settings.debate.mode}
-                    onChange={(e) => setSettings({ ...settings, debate: { ...settings.debate, mode: e.target.value as any } })}
+                    value={settings.debate.preferredMode}
+                    onChange={(e) => setSettings({ ...settings, debate: { ...settings.debate, preferredMode: e.target.value as any } })}
                     className="input-field"
                   >
-                    <option value="debate">🤖⚔️🤖 Debate — Claude vs Codex 토론</option>
-                    <option value="claude-only">🟣 Claude Only — Claude 단독</option>
-                    <option value="codex-only">🟢 Codex Only — GPT 단독</option>
+                    <option value="debate">Debate — Claude vs Codex</option>
+                    <option value="claude-only">Claude Only</option>
+                    <option value="codex-only">Codex Only</option>
                   </select>
+                  <p className="text-[10px] text-gray-600 mt-1">Actual available modes depend on provider readiness</p>
                 </Field>
 
                 <Field label="Max Rounds">
@@ -114,7 +109,7 @@ export function SettingsModal({ onClose }: Props) {
                     />
                     <span className="text-sm text-gray-300 w-6 text-center">{settings.debate.maxRounds}</span>
                   </div>
-                  <p className="text-[10px] text-gray-600 mt-1">합의 안 되면 이 횟수 후 Claude 의견 우선 적용</p>
+                  <p className="text-[10px] text-gray-600 mt-1">After max rounds without consensus, Claude's proposal wins</p>
                 </Field>
 
                 <Field label="Auto Apply">
@@ -125,7 +120,7 @@ export function SettingsModal({ onClose }: Props) {
                       onChange={(e) => setSettings({ ...settings, debate: { ...settings.debate, autoApply: e.target.checked } })}
                       className="rounded"
                     />
-                    <span className="text-xs text-gray-400">합의 후 자동으로 코드 적용</span>
+                    <span className="text-xs text-gray-400">Auto-apply code after consensus</span>
                   </label>
                 </Field>
               </div>
@@ -133,7 +128,7 @@ export function SettingsModal({ onClose }: Props) {
 
             {tab === 'git' && (
               <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-300">📦 Git Settings</h3>
+                <h3 className="text-sm font-bold text-gray-300">Git Settings</h3>
 
                 <Field label="Worktree Isolation">
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -143,7 +138,7 @@ export function SettingsModal({ onClose }: Props) {
                       onChange={(e) => setSettings({ ...settings, git: { ...settings.git, useWorktree: e.target.checked } })}
                       className="rounded"
                     />
-                    <span className="text-xs text-gray-400">토론마다 별도 Git 워크트리에서 작업</span>
+                    <span className="text-xs text-gray-400">Isolate each debate in a separate git worktree</span>
                   </label>
                 </Field>
 
@@ -155,7 +150,7 @@ export function SettingsModal({ onClose }: Props) {
                       onChange={(e) => setSettings({ ...settings, git: { ...settings.git, autoCommit: e.target.checked } })}
                       className="rounded"
                     />
-                    <span className="text-xs text-gray-400">코드 적용 시 자동 커밋</span>
+                    <span className="text-xs text-gray-400">Auto-commit when code is applied</span>
                   </label>
                 </Field>
 
@@ -173,22 +168,22 @@ export function SettingsModal({ onClose }: Props) {
 
             {tab === 'permissions' && (
               <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-300">🔒 Permission Rules</h3>
-                <p className="text-xs text-gray-500">AI가 수행할 수 있는 작업을 제어합니다. Claude Code 스타일.</p>
+                <h3 className="text-sm font-bold text-gray-300">Permission Rules</h3>
+                <p className="text-xs text-gray-500">Control what actions AI agents can perform.</p>
                 <div className="space-y-2">
-                  {['파일 읽기: 항상 허용', 'src/ 파일 쓰기: 항상 허용', 'npm run *: 항상 허용', 'rm *: 매번 확인', 'sudo *: 항상 차단', 'git push: 매번 확인'].map((rule, i) => (
+                  {['File read: always allow', 'src/ write: always allow', 'npm run *: always allow', 'rm *: ask every time', 'sudo *: always deny', 'git push: ask every time'].map((rule, i) => (
                     <div key={i} className="flex items-center justify-between bg-[#1a1a1a] rounded px-3 py-2 border border-[#333]">
                       <span className="text-xs text-gray-400">{rule}</span>
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-gray-600">* 상세 규칙 편집은 추후 업데이트 예정</p>
+                <p className="text-[10px] text-gray-600">* Detailed rule editing coming soon</p>
               </div>
             )}
 
             {tab === 'general' && (
               <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-300">⚙️ General</h3>
+                <h3 className="text-sm font-bold text-gray-300">General</h3>
 
                 <Field label="Language">
                   <select
@@ -221,8 +216,8 @@ export function SettingsModal({ onClose }: Props) {
                     onChange={(e) => setSettings({ ...settings, general: { ...settings.general, theme: e.target.value as any } })}
                     className="input-field"
                   >
-                    <option value="dark">🌙 Dark</option>
-                    <option value="light">☀️ Light (Coming Soon)</option>
+                    <option value="dark">Dark</option>
+                    <option value="light">Light (Coming Soon)</option>
                   </select>
                 </Field>
               </div>
@@ -240,7 +235,7 @@ export function SettingsModal({ onClose }: Props) {
             disabled={saving}
             className="px-6 py-2 text-sm bg-gradient-to-r from-purple-600 to-green-600 rounded font-medium hover:from-purple-500 hover:to-green-500 disabled:opacity-50 transition"
           >
-            {saving ? 'Saving...' : '💾 Save'}
+            {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
@@ -277,41 +272,38 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function ProviderSettings({
-  title,
-  color,
-  models,
+function ClaudeProviderSettings({
   settings,
   onChange,
 }: {
-  title: string;
-  color: string;
-  models: ModelInfo[];
-  settings: AISettings['claude'];
-  onChange: (s: AISettings['claude']) => void;
+  settings: ClaudeSettings;
+  onChange: (s: ClaudeSettings) => void;
 }) {
   return (
     <div className="space-y-4">
-      <h3 className={`text-sm font-bold text-${color}-400`}>{title}</h3>
+      <h3 className="text-sm font-bold text-purple-400">Claude (Anthropic)</h3>
 
-      <Field label="Authentication">
+      <Field label="Transport">
         <select
-          value={settings.authType}
-          onChange={(e) => onChange({ ...settings, authType: e.target.value as any })}
+          value={settings.selectedTransport}
+          onChange={(e) => onChange({ ...settings, selectedTransport: e.target.value as any })}
           className="input-field"
         >
-          <option value="oauth">🔐 OAuth (구독 계정 연결)</option>
-          <option value="apiKey">🔑 API Key (직접 입력)</option>
+          <option value="api">API Key</option>
+          <option value="cli">Claude CLI (subscription)</option>
         </select>
+        {settings.selectedTransport === 'cli' && (
+          <p className="text-[10px] text-gray-600 mt-1">Requires Claude Code CLI installed and logged in</p>
+        )}
       </Field>
 
-      {settings.authType === 'apiKey' && (
+      {settings.selectedTransport === 'api' && (
         <Field label="API Key">
           <input
             type="password"
             value={settings.apiKey || ''}
             onChange={(e) => onChange({ ...settings, apiKey: e.target.value })}
-            placeholder={color === 'purple' ? 'sk-ant-...' : 'sk-proj-...'}
+            placeholder="sk-ant-..."
             className="input-field"
           />
         </Field>
@@ -323,7 +315,7 @@ function ProviderSettings({
           onChange={(e) => onChange({ ...settings, model: e.target.value })}
           className="input-field"
         >
-          {models.map((m) => (
+          {CLAUDE_MODELS.map((m) => (
             <option key={m.id} value={m.id}>
               {m.tier === 'flagship' ? '👑' : m.tier === 'balanced' ? '⚡' : '🚀'} {m.name} — {m.description}
             </option>
@@ -353,9 +345,11 @@ function ProviderSettings({
             className="input-field"
           >
             <option value={4096}>4,096</option>
-            <option value={8192}>8,192 (기본)</option>
+            <option value={8192}>8,192</option>
             <option value={16384}>16,384</option>
             <option value={32000}>32,000</option>
+            <option value={64000}>64,000</option>
+            <option value={128000}>128,000</option>
           </select>
         </Field>
       </div>
@@ -364,7 +358,107 @@ function ProviderSettings({
         <textarea
           value={settings.systemPrompt || ''}
           onChange={(e) => onChange({ ...settings, systemPrompt: e.target.value })}
-          placeholder="AI의 기본 역할을 지정합니다. 비워두면 기본값 사용."
+          placeholder="Custom system prompt. Leave empty for default."
+          rows={3}
+          className="input-field resize-none"
+        />
+      </Field>
+    </div>
+  );
+}
+
+function CodexProviderSettings({
+  settings,
+  onChange,
+}: {
+  settings: OpenAISettings;
+  onChange: (s: OpenAISettings) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <h3 className="text-sm font-bold text-green-400">Codex / GPT (OpenAI)</h3>
+
+      <Field label="Transport">
+        <div className="flex items-center gap-2">
+          <span className="input-field text-gray-500 cursor-not-allowed">API Key</span>
+        </div>
+        <p className="text-[10px] text-gray-600 mt-1">Codex CLI support coming soon</p>
+      </Field>
+
+      <Field label="API Key">
+        <input
+          type="password"
+          value={settings.apiKey || ''}
+          onChange={(e) => onChange({ ...settings, apiKey: e.target.value })}
+          placeholder="sk-proj-..."
+          className="input-field"
+        />
+      </Field>
+
+      <Field label="Model">
+        <select
+          value={settings.model}
+          onChange={(e) => onChange({ ...settings, model: e.target.value })}
+          className="input-field"
+        >
+          {OPENAI_MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.tier === 'flagship' ? '👑' : m.tier === 'balanced' ? '⚡' : '🚀'} {m.name} — {m.description}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Temperature">
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={settings.temperature * 100}
+              onChange={(e) => onChange({ ...settings, temperature: parseInt(e.target.value) / 100 })}
+              className="flex-1"
+            />
+            <span className="text-xs text-gray-400 w-8">{settings.temperature}</span>
+          </div>
+        </Field>
+
+        <Field label="Max Tokens">
+          <select
+            value={settings.maxTokens}
+            onChange={(e) => onChange({ ...settings, maxTokens: parseInt(e.target.value) })}
+            className="input-field"
+          >
+            <option value={4096}>4,096</option>
+            <option value={8192}>8,192</option>
+            <option value={16384}>16,384</option>
+            <option value={32000}>32,000</option>
+            <option value={64000}>64,000</option>
+            <option value={128000}>128,000</option>
+          </select>
+        </Field>
+      </div>
+
+      <Field label="Reasoning Effort">
+        <select
+          value={settings.reasoningEffort || 'none'}
+          onChange={(e) => onChange({ ...settings, reasoningEffort: e.target.value as ReasoningEffort })}
+          className="input-field"
+        >
+          <option value="none">None — Standard generation</option>
+          <option value="low">Low — Light reasoning</option>
+          <option value="medium">Medium — Balanced (recommended for debate)</option>
+          <option value="high">High — Deep reasoning</option>
+        </select>
+        <p className="text-[10px] text-gray-600 mt-1">GPT-5.4 supports built-in reasoning levels</p>
+      </Field>
+
+      <Field label="System Prompt (Optional)">
+        <textarea
+          value={settings.systemPrompt || ''}
+          onChange={(e) => onChange({ ...settings, systemPrompt: e.target.value })}
+          placeholder="Custom system prompt. Leave empty for default."
           rows={3}
           className="input-field resize-none"
         />

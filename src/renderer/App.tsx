@@ -5,11 +5,13 @@ import { CodeView } from './components/CodeView';
 import { SettingsModal } from './components/SettingsModal';
 import { PermissionModal } from './components/PermissionModal';
 import { DiffView } from './components/DiffView';
-import { DebateMessage } from '../shared/types';
+import { DebateMessage, AppReadiness } from '../shared/types';
 
 declare global {
   interface Window {
     api: {
+      getReadiness: (projectPath: string) => Promise<AppReadiness>;
+      validateStart: () => Promise<{ valid: boolean; error?: string }>;
       startDebate: (prompt: string, projectPath: string) => Promise<string>;
       intervene: (decision: string) => Promise<any>;
       applyCode: (debateId: string) => Promise<any>;
@@ -218,6 +220,7 @@ export default function App() {
             projectPath={projectPath}
             onProjectPathChange={setProjectPath}
             onOpenDirectory={handleOpenDirectory}
+            onOpenSettings={(tab) => setShowSettings(true)}
           />
         </div>
 

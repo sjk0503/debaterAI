@@ -3,10 +3,12 @@
 // ============================================================================
 
 export type AIProvider = 'claude' | 'codex';
+export type TransportType = 'api' | 'cli';
 export type DebateMode = 'debate' | 'claude-only' | 'codex-only';
 export type DebateStatus = 'idle' | 'thinking' | 'debating' | 'consensus' | 'coding' | 'done' | 'error';
 export type Agreement = 'agree' | 'partial' | 'disagree';
 export type MessageRole = 'user' | 'claude' | 'codex' | 'system';
+export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
 
 export interface DebateMessage {
   id: string;
@@ -37,6 +39,7 @@ export interface DebateSession {
   currentRound: number;
   maxRounds: number;
   consensus?: ConsensusResult;
+  artifactMessageId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -64,24 +67,36 @@ export interface CodeChange {
   diff?: string;
 }
 
-export interface AIProviderSettings {
-  authType: 'oauth' | 'apiKey';
+// ============================================================================
+// Provider Settings — transport-aware, no OAuth
+// ============================================================================
+
+export interface ClaudeSettings {
+  selectedTransport: TransportType;
   apiKey?: string;
-  oauthToken?: string;
   model: string;
   temperature: number;
   maxTokens: number;
   systemPrompt?: string;
 }
 
+export interface OpenAISettings {
+  selectedTransport: TransportType;
+  apiKey?: string;
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  reasoningEffort?: ReasoningEffort;
+  systemPrompt?: string;
+}
+
 export interface AISettings {
-  claude: AIProviderSettings;
-  codex: AIProviderSettings;
+  claude: ClaudeSettings;
+  codex: OpenAISettings;
   debate: {
-    mode: DebateMode;
+    preferredMode: DebateMode;
     maxRounds: number;
     autoApply: boolean;
-    soloMode: 'debate' | 'claude-only' | 'codex-only';
   };
   git: {
     useWorktree: boolean;
@@ -93,6 +108,45 @@ export interface AISettings {
     language: 'ko' | 'en';
     fontSize: number;
   };
+}
+
+// ============================================================================
+// Readiness — provider status + mode gating
+// ============================================================================
+
+export type CliStatus = 'notInstalled' | 'notLoggedIn' | 'configured' | 'error';
+
+export interface ProviderStatus {
+  provider: AIProvider;
+  selectedTransport: TransportType;
+  supportedTransports: TransportType[];
+  ready: boolean;
+  status: 'configured' | 'needsKey' | 'needsCliLogin' | 'needsCliInstall' | 'error';
+  detail: string;
+  modelLabel?: string;
+}
+
+export interface ModeStatus {
+  mode: DebateMode;
+  enabled: boolean;
+  blockers: string[];
+}
+
+export type ReadinessAction =
+  | { type: 'browseProject' }
+  | { type: 'openSettings'; tab: string }
+  | { type: 'openExternalLink'; url: string }
+  | { type: 'startMode'; mode: DebateMode };
+
+export interface AppReadiness {
+  project: { ready: boolean; path: string };
+  providers: {
+    claude: ProviderStatus;
+    codex: ProviderStatus;
+  };
+  modes: ModeStatus[];
+  preferredMode: DebateMode;
+  primaryAction: ReadinessAction | null;
 }
 
 export interface FileTreeItem {

@@ -1,7 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('api', {
+  // ── App Readiness ────────────────────────────────────────────────────────
+  getReadiness: (projectPath: string) =>
+    ipcRenderer.invoke('app:getReadiness', { projectPath }),
+
   // ── Debate ──────────────────────────────────────────────────────────────
+  validateStart: () =>
+    ipcRenderer.invoke('debate:validateStart'),
   startDebate: (prompt: string, projectPath: string) =>
     ipcRenderer.invoke('debate:start', { prompt, projectPath }),
   intervene: (decision: string) =>

@@ -7,6 +7,8 @@ import {
   Agreement,
   DebateStatus,
   ConsensusResult,
+  AppReadiness,
+  ModeStatus,
 } from '../shared/types';
 
 const CLAUDE_SYSTEM = `You are Claude, a senior software engineer participating in a code debate.
@@ -36,6 +38,15 @@ Rules:
 At the end of your response, add a line:
 [AGREEMENT: agree/partial/disagree]`;
 
+const CODEX_SOLO_SYSTEM = `You are Codex, a senior software engineer writing code directly.
+Your role: PRIMARY CODER — you implement the requested feature.
+
+Rules:
+- Propose concrete implementation plans with code
+- Include complete, production-ready code blocks
+- Consider edge cases, performance, and maintainability
+- Be concise but thorough`;
+
 export class DebateEngine {
   private sessions: Map<string, DebateSession> = new Map();
   private messageCallback?: (msg: DebateMessage) => void;
@@ -62,6 +73,55 @@ export class DebateEngine {
   }
 
   /**
+   * Validate that a debate can start — checks provider readiness for the given mode
+   */
+  validateStart(mode: string): { valid: boolean; error?: string } {
+    if (mode === 'debate') {
+      if (!this.ai.isClaudeReady() || !this.ai.isCodexReady()) {
+        return { valid: false, error: 'Debate mode requires both Claude and Codex to be configured.' };
+      }
+    } else if (mode === 'claude-only') {
+      if (!this.ai.isClaudeReady()) {
+        return { valid: false, error: 'Claude-only mode requires Claude to be configured.' };
+      }
+    } else if (mode === 'codex-only') {
+      if (!this.ai.isCodexReady()) {
+        return { valid: false, error: 'Codex-only mode requires Codex (OpenAI) to be configured.' };
+      }
+    }
+    return { valid: true };
+  }
+
+  /**
+   * Compute which modes are enabled given current provider state
+   */
+  getEnabledModes(): ModeStatus[] {
+    const claudeReady = this.ai.isClaudeReady();
+    const codexReady = this.ai.isCodexReady();
+
+    return [
+      {
+        mode: 'debate',
+        enabled: claudeReady && codexReady,
+        blockers: [
+          ...(!claudeReady ? ['Claude not configured'] : []),
+          ...(!codexReady ? ['Codex not configured'] : []),
+        ],
+      },
+      {
+        mode: 'claude-only',
+        enabled: claudeReady,
+        blockers: !claudeReady ? ['Claude not configured'] : [],
+      },
+      {
+        mode: 'codex-only',
+        enabled: codexReady,
+        blockers: !codexReady ? ['Codex not configured'] : [],
+      },
+    ];
+  }
+
+  /**
    * 토론 시작
    */
   async startDebate(prompt: string, projectPath: string, projectContext?: string): Promise<string> {
@@ -73,7 +133,7 @@ export class DebateEngine {
       prompt,
       projectPath,
       projectContext: projectContext || '',
-      mode: settings.debate.mode,
+      mode: settings.debate.preferredMode,
       status: 'thinking',
       messages: [],
       rounds: [],
@@ -278,7 +338,7 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
 \`\`\``;
 
     const role = agent === 'claude' ? 'claude' as const : 'codex' as const;
-    const systemPrompt = agent === 'claude' ? CLAUDE_SYSTEM : CODEX_SYSTEM;
+    const systemPrompt = agent === 'claude' ? CLAUDE_SYSTEM : CODEX_SOLO_SYSTEM;
 
     const msg: DebateMessage = {
       id: uuidv4(),
@@ -312,6 +372,7 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
 
     msg.content = response;
     session.messages.push(msg);
+    session.artifactMessageId = msg.id;
 
     // 솔로 모드에서는 바로 코드 생성 완료
     this.setStatus(debateId, 'done');
@@ -432,6 +493,7 @@ Only output the final code files, no explanations needed.`;
 
     codeMsg.content = codeResponse;
     session.messages.push(codeMsg);
+    session.artifactMessageId = codeMsg.id;
 
     this.setStatus(debateId, 'done');
     this.emit({
@@ -457,16 +519,23 @@ Only output the final code files, no explanations needed.`;
     const session = this.sessions.get(debateId);
     if (!session) return { success: false, files: [], errors: ['Session not found'] };
 
-    // 마지막 Claude 메시지에서 코드 부록 추출
-    const lastClaudeMsg = [...session.messages]
-      .reverse()
-      .find((m) => m.role === 'claude' && m.content.includes('```'));
+    // Find the artifact message — either tracked by ID or fallback to last code-bearing message
+    let artifactMsg: DebateMessage | undefined;
+    if (session.artifactMessageId) {
+      artifactMsg = session.messages.find((m) => m.id === session.artifactMessageId);
+    }
+    if (!artifactMsg) {
+      // Fallback: find the last message (any role) with code blocks
+      artifactMsg = [...session.messages]
+        .reverse()
+        .find((m) => (m.role === 'claude' || m.role === 'codex') && m.content.includes('```'));
+    }
 
-    if (!lastClaudeMsg) {
+    if (!artifactMsg) {
       return { success: false, files: [], errors: ['No code found in debate'] };
     }
 
-    const codeFiles = this.parseCodeFiles(lastClaudeMsg.content, session.projectPath);
+    const codeFiles = this.parseCodeFiles(artifactMsg.content, session.projectPath);
     const fs = await import('fs/promises');
     const path = await import('path');
     const appliedFiles: string[] = [];
