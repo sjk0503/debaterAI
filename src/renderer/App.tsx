@@ -307,6 +307,12 @@ export default function App() {
         setCurrentSessionId(debateId);
         setSessionRefresh((v) => v + 1);
       }}
+      onStopDebate={() => {
+        window.api.killAllAgents?.().catch(() => {});
+        setStatus('idle');
+        setSessionRefresh((v) => v + 1);
+        handleAddSystemMessage('토론이 중단되었습니다.');
+      }}
     />
   );
 

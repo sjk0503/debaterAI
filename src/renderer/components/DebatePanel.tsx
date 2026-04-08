@@ -23,13 +23,14 @@ interface Props {
   onApplyCode?: () => void;
   onAddSystemMessage?: (content: string) => void;
   onSessionStarted?: (debateId: string) => void;
+  onStopDebate?: () => void;
 }
 
 export function DebatePanel({
   messages, status, projectPath, selectedMode, settingsVersion,
   currentSessionId, latestAgentEvent,
   onProjectPathChange, onOpenDirectory, onOpenSettings, onModeChange,
-  onClearMessages, onShowDiff, onApplyCode, onAddSystemMessage, onSessionStarted,
+  onClearMessages, onShowDiff, onApplyCode, onAddSystemMessage, onSessionStarted, onStopDebate,
 }: Props) {
   const [input, setInput] = useState('');
   const [readiness, setReadiness] = useState<AppReadiness | null>(null);
@@ -355,24 +356,40 @@ export function DebatePanel({
             onFocus={(e) => !isActive && (e.currentTarget.style.borderColor = 'var(--accent)')}
             onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
           />
-          <button
-            onClick={handleSubmit}
-            disabled={!input.trim() || !projectPath.trim() || isActive}
-            className="text-xs px-4 py-2 rounded font-medium transition h-10"
-            style={{
-              background: isActive || !input.trim() || !projectPath.trim()
-                ? 'var(--bg-3)'
-                : 'var(--accent)',
-              color: isActive || !input.trim() || !projectPath.trim()
-                ? 'var(--text-3)'
-                : 'white',
-              border: 'none',
-              cursor: isActive ? 'not-allowed' : 'pointer',
-              minWidth: 96,
-            }}
-          >
-            {isActive ? activeLabel : 'Send'}
-          </button>
+          {isActive ? (
+            <button
+              onClick={() => onStopDebate?.()}
+              className="text-xs px-4 py-2 rounded font-medium transition h-10"
+              style={{
+                background: '#ef4444',
+                color: 'white',
+                border: 'none',
+                cursor: 'pointer',
+                minWidth: 96,
+              }}
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={handleSubmit}
+              disabled={!input.trim() || !projectPath.trim()}
+              className="text-xs px-4 py-2 rounded font-medium transition h-10"
+              style={{
+                background: !input.trim() || !projectPath.trim()
+                  ? 'var(--bg-3)'
+                  : 'var(--accent)',
+                color: !input.trim() || !projectPath.trim()
+                  ? 'var(--text-3)'
+                  : 'white',
+                border: 'none',
+                cursor: 'pointer',
+                minWidth: 96,
+              }}
+            >
+              Send
+            </button>
+          )}
         </div>
       </div>
     </div>
