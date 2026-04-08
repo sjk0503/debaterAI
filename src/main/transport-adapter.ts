@@ -75,9 +75,11 @@ export class ClaudeApiAdapter implements TransportAdapter {
 // ============================================================================
 // Claude CLI Adapter — delegates to locally installed Claude Code CLI
 //
-// Uses: claude --print --bare --system-prompt "..." --model MODEL
-//       --output-format text|stream-json --max-turns 1
+// Uses: claude --print --output-format text --system-prompt "..." --model MODEL
+//       --max-turns 20
 //
+// Always uses --output-format text so stdout streams the response progressively.
+// stream-json with --print only emits complete messages at turn end, not mid-turn.
 // Prompt is piped via stdin to avoid OS ARG_MAX limits on long debates.
 // ============================================================================
 
@@ -95,35 +97,30 @@ export class ClaudeCliAdapter implements TransportAdapter {
     onStream?: (chunk: string) => void,
   ): Promise<string> {
     const prompt = this.buildPrompt(messages);
-
-    if (onStream) {
-      return this.spawnClaude(systemPrompt, prompt, 'stream-json', onStream);
-    } else {
-      return this.spawnClaude(systemPrompt, prompt, 'text');
-    }
+    // Always use 'text' output format with --print mode.
+    // 'stream-json' with --print only emits complete assistant messages at the end
+    // of each turn (no mid-turn chunks), so it provides no streaming benefit over
+    // 'text' mode. 'text' streams raw output progressively to stdout in real-time.
+    return this.spawnClaude(systemPrompt, prompt, onStream);
   }
 
   /**
    * Spawn claude CLI process. Prompt is piped via stdin to avoid ARG_MAX.
+   * Always uses --output-format text so stdout streams the response in real-time.
    */
   private spawnClaude(
     systemPrompt: string,
     prompt: string,
-    outputFormat: 'text' | 'stream-json',
     onStream?: (chunk: string) => void,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const args = [
         '--print',
-        '--output-format', outputFormat,
+        '--output-format', 'text',
         '--system-prompt', systemPrompt,
         '--model', this.model,
         '--max-turns', '20',
       ];
-
-      if (outputFormat === 'stream-json') {
-        args.push('--verbose');
-      }
 
       if (this.effort) {
         args.push('--effort', this.effort);
@@ -151,48 +148,12 @@ export class ClaudeCliAdapter implements TransportAdapter {
 
       let fullText = '';
       let stderr = '';
-      let lineBuffer = ''; // Buffer for partial JSON lines
 
       proc.stdout?.on('data', (data: Buffer) => {
+        // Text mode — pass through directly and accumulate
         const text = data.toString();
-
-        if (outputFormat === 'text') {
-          // Plain text mode — pass through directly
-          fullText += text;
-          onStream?.(text);
-          return;
-        }
-
-        // stream-json mode — buffer lines and parse complete JSON
-        lineBuffer += text;
-        const lines = lineBuffer.split('\n');
-        // Keep the last (potentially incomplete) line in the buffer
-        lineBuffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const parsed = JSON.parse(line);
-            if (parsed.type === 'assistant' && parsed.message?.content) {
-              for (const block of parsed.message.content) {
-                if (block.type === 'text') {
-                  fullText += block.text;
-                  onStream?.(block.text);
-                }
-              }
-            } else if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-              fullText += parsed.delta.text;
-              onStream?.(parsed.delta.text);
-            } else if (parsed.type === 'result' && parsed.result) {
-              if (!fullText && typeof parsed.result === 'string') {
-                fullText = parsed.result;
-                onStream?.(parsed.result);
-              }
-            }
-          } catch {
-            // Not valid JSON — ignore incomplete fragments
-          }
-        }
+        fullText += text;
+        onStream?.(text);
       });
 
       proc.stderr?.on('data', (data: Buffer) => {
@@ -200,28 +161,6 @@ export class ClaudeCliAdapter implements TransportAdapter {
       });
 
       proc.on('close', (code: number | null) => {
-        // Process any remaining buffered content
-        if (lineBuffer.trim()) {
-          if (outputFormat === 'text') {
-            fullText += lineBuffer;
-            onStream?.(lineBuffer);
-          } else {
-            try {
-              const parsed = JSON.parse(lineBuffer);
-              if (parsed.type === 'assistant' && parsed.message?.content) {
-                for (const block of parsed.message.content) {
-                  if (block.type === 'text') {
-                    fullText += block.text;
-                    onStream?.(block.text);
-                  }
-                }
-              }
-            } catch {
-              // Ignore
-            }
-          }
-        }
-
         // code 143 = SIGTERM (normal kill), code 137 = SIGKILL — not real errors
         if (code === 0 || fullText || code === 143 || code === 137) {
           resolve(fullText);

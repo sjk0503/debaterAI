@@ -140,17 +140,23 @@ export default function App() {
     if (isActive) {
       await window.api.killAllAgents?.().catch(() => {});
     }
+    // Clear messages first so stale content doesn't persist while loading
+    setMessages([]);
+    setStatus('idle');
     setCurrentSessionId(sessionId);
     try {
+      console.log('[Session] Loading session:', sessionId);
       const events = await window.api.sessionLoad(sessionId);
+      console.log('[Session] Loaded events count:', events?.length ?? 0, 'types:', events?.map((e: any) => e.type));
       const result = reconstructMessages(events || []);
+      console.log('[Session] Reconstructed messages:', result.messages.length, 'status:', result.finalStatus);
       setMessages(result.messages);
       setStatus(result.finalStatus);
       const meta = await window.api.sessionGetMeta(sessionId);
       if (meta?.mode) setSelectedMode(meta.mode as DebateMode);
       if (meta?.projectPath) setProjectPath(meta.projectPath);
     } catch (err) {
-      console.error('Failed to load session:', err);
+      console.error('[Session] Failed to load session:', err);
       setMessages([]);
       setStatus('idle');
     }

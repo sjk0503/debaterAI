@@ -140,19 +140,24 @@ function setupIPC() {
   // Session persistence
   // ============================================================================
   ipcMain.handle('session:list', async () => {
-    return debateEngine?.getSessionStore().list() ?? [];
+    const sessions = sessionStore.list();
+    console.log('[IPC session:list] found', sessions.length, 'sessions');
+    return sessions;
   });
 
   ipcMain.handle('session:load', async (_event, { sessionId }) => {
-    return debateEngine?.getSessionStore().readEvents(sessionId) ?? [];
+    console.log('[IPC session:load] loading session:', sessionId);
+    const events = sessionStore.readEvents(sessionId);
+    console.log('[IPC session:load] found', events.length, 'events');
+    return events;
   });
 
   ipcMain.handle('session:getMeta', async (_event, { sessionId }) => {
-    return debateEngine?.getSessionStore().getMeta(sessionId);
+    return sessionStore.getMeta(sessionId);
   });
 
   ipcMain.handle('session:delete', async (_event, { sessionId }) => {
-    debateEngine?.getSessionStore().delete(sessionId);
+    sessionStore.delete(sessionId);
     return { success: true };
   });
 

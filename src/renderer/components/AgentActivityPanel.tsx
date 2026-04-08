@@ -34,13 +34,13 @@ export function AgentActivityPanel({ events, isStreaming, provider }: Props) {
   const color = provider === 'claude' ? 'var(--claude)' : 'var(--codex)';
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1">
       {segments.map((seg, i) => {
         switch (seg.type) {
           case 'text':
             return (
-              <div key={i} className="message-content rounded-md px-3 py-2.5 text-xs"
-                style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', lineHeight: 1.6 }}>
+              <div key={i} className="message-content rounded px-2.5 py-2 text-xs"
+                style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', lineHeight: 1.5 }}>
                 <MarkdownMessage
                   content={seg.text}
                   isStreaming={isStreaming && i === segments.length - 1}
@@ -74,14 +74,14 @@ export function AgentActivityPanel({ events, isStreaming, provider }: Props) {
 
           case 'status':
             return (
-              <div key={i} className="text-xs px-2 py-1" style={{ color: 'var(--text-3)' }}>
+              <div key={i} className="text-xs px-2 py-0.5" style={{ color: 'var(--text-3)' }}>
                 {seg.message}
               </div>
             );
 
           case 'error':
             return (
-              <div key={i} className="text-xs px-3 py-2 rounded"
+              <div key={i} className="text-xs px-2.5 py-1.5 rounded"
                 style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444' }}>
                 {seg.message}
               </div>
@@ -98,6 +98,17 @@ export function AgentActivityPanel({ events, isStreaming, provider }: Props) {
 
 // ── Sub-Components ────────────────────────────────────────────────────
 
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="10" height="10" viewBox="0 0 10 10" fill="none"
+      style={{ flexShrink: 0, transition: 'transform 0.15s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+    >
+      <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function ToolCard({ toolName, detail, output, isError, expanded, onToggle, color }: {
   toolName: string;
   detail: string;
@@ -111,17 +122,17 @@ function ToolCard({ toolName, detail, output, isError, expanded, onToggle, color
     <div className="rounded text-xs" style={{ border: '1px solid var(--border)', background: 'var(--bg-1)' }}>
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-left"
-        style={{ color: 'var(--text-2)' }}
+        className="w-full flex items-center gap-1.5 px-2 py-1 text-left"
+        style={{ color: 'var(--text-3)' }}
       >
-        <span style={{ color, fontSize: 10 }}>{expanded ? '▼' : '▶'}</span>
-        <span className="font-mono" style={{ color }}>{toolName}</span>
+        <Chevron open={expanded} />
+        <span className="font-mono font-medium" style={{ color, flexShrink: 0 }}>{toolName}</span>
         <span className="truncate flex-1" style={{ color: 'var(--text-3)' }}>{detail}</span>
-        {isError && <span style={{ color: '#ef4444' }}>failed</span>}
+        {isError && <span className="flex-shrink-0" style={{ color: '#ef4444' }}>failed</span>}
       </button>
       {expanded && output && (
-        <div className="px-3 py-2 font-mono text-xs overflow-x-auto selectable-text"
-          style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-0)', color: 'var(--text-3)', whiteSpace: 'pre-wrap', maxHeight: 200, overflowY: 'auto' }}>
+        <div className="px-2.5 py-1.5 font-mono text-xs overflow-x-auto selectable-text"
+          style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-0)', color: 'var(--text-3)', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto' }}>
           {output}
         </div>
       )}
@@ -134,14 +145,12 @@ function FileOpCard({ filePath, action, color }: {
   action: 'read' | 'write';
   color: string;
 }) {
-  const icon = action === 'read' ? '📄' : '✏️';
-  const label = action === 'read' ? 'Read' : 'Edited';
+  const label = action === 'read' ? 'Read' : 'Write';
   return (
-    <div className="flex items-center gap-2 px-3 py-1 text-xs rounded"
+    <div className="flex items-center gap-1.5 px-2 py-0.5 text-xs rounded"
       style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-      <span>{icon}</span>
-      <span style={{ color }}>{label}</span>
-      <span className="font-mono truncate selectable-text" style={{ color: 'var(--text-2)' }}>{filePath}</span>
+      <span className="font-medium flex-shrink-0" style={{ color }}>{label}</span>
+      <span className="font-mono truncate selectable-text" style={{ color: 'var(--text-3)' }}>{filePath}</span>
     </div>
   );
 }
@@ -157,17 +166,19 @@ function BashCard({ command, output, exitCode }: {
     <div className="rounded text-xs" style={{ border: '1px solid var(--border)', background: 'var(--bg-1)' }}>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-left font-mono"
+        className="w-full flex items-center gap-1.5 px-2 py-1 text-left font-mono"
+        style={{ color: 'var(--text-3)' }}
       >
-        <span style={{ color: success ? 'var(--codex)' : '#ef4444' }}>$</span>
+        <Chevron open={expanded} />
+        <span className="font-medium flex-shrink-0" style={{ color: success ? 'var(--codex)' : '#ef4444' }}>$</span>
         <span className="truncate selectable-text" style={{ color: 'var(--text-2)' }}>{command}</span>
         {exitCode !== undefined && (
-          <span style={{ color: success ? 'var(--text-3)' : '#ef4444' }}>exit {exitCode}</span>
+          <span className="flex-shrink-0" style={{ color: success ? 'var(--text-3)' : '#ef4444' }}>exit {exitCode}</span>
         )}
       </button>
       {expanded && output && (
-        <div className="px-3 py-2 font-mono overflow-x-auto selectable-text"
-          style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-0)', color: 'var(--text-3)', whiteSpace: 'pre-wrap', maxHeight: 200, overflowY: 'auto' }}>
+        <div className="px-2.5 py-1.5 font-mono overflow-x-auto selectable-text"
+          style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-0)', color: 'var(--text-3)', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto' }}>
           {output}
         </div>
       )}
