@@ -85,7 +85,7 @@ function SessionCard({ session, isActive, isRunning, onSelect, onDelete }: {
 
   return (
     <div
-      className="group px-3 py-2 cursor-pointer transition relative"
+      className="group px-3 py-2 cursor-pointer transition relative no-drag"
       style={{
         background: isActive ? 'var(--bg-3)' : 'transparent',
         borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',

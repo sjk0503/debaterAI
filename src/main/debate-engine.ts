@@ -266,7 +266,8 @@ export class DebateEngine {
         },
       );
 
-      claudeMsg.content = claudeResponse;
+      claudeMsg.content = this.stripAgreementMarker(claudeResponse);
+      this.emit({ ...claudeMsg }, debateId);
       session.messages.push(claudeMsg);
       this.persistAgentMessage(debateId, claudeMsg);
 
@@ -305,7 +306,8 @@ export class DebateEngine {
         },
       );
 
-      codexMsg.content = codexResponse;
+      codexMsg.content = this.stripAgreementMarker(codexResponse);
+      this.emit({ ...codexMsg }, debateId);
       session.messages.push(codexMsg);
       this.persistAgentMessage(debateId, codexMsg);
 
@@ -322,8 +324,8 @@ export class DebateEngine {
 
       const debateRound: DebateRound = {
         round,
-        claudeResponse,
-        codexResponse,
+        claudeResponse: this.stripAgreementMarker(claudeResponse),
+        codexResponse: this.stripAgreementMarker(codexResponse),
         agreement: roundAgreement,
       };
       session.rounds.push(debateRound);
@@ -699,6 +701,10 @@ Please review this proposal. Consider:
 4. Code quality and maintainability
 
 Provide your feedback. Agree if the approach is solid, or suggest specific improvements.`;
+  }
+
+  private stripAgreementMarker(text: string): string {
+    return text.replace(/\[AGREEMENT:\s*(agree|partial|disagree)\]/gi, '').trim();
   }
 
   private parseAgreement(response: string): Agreement {

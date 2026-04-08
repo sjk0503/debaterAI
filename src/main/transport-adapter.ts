@@ -97,26 +97,25 @@ export class ClaudeCliAdapter implements TransportAdapter {
     onStream?: (chunk: string) => void,
   ): Promise<string> {
     const prompt = this.buildPrompt(messages);
-    // Always use 'text' output format with --print mode.
-    // 'stream-json' with --print only emits complete assistant messages at the end
-    // of each turn (no mid-turn chunks), so it provides no streaming benefit over
-    // 'text' mode. 'text' streams raw output progressively to stdout in real-time.
     return this.spawnClaude(systemPrompt, prompt, onStream);
   }
 
   /**
-   * Spawn claude CLI process. Prompt is piped via stdin to avoid ARG_MAX.
-   * Always uses --output-format text so stdout streams the response in real-time.
+   * Spawn claude CLI process with stream-json for structured output.
+   * Uses ClaudeStreamParser to extract text deltas for real-time streaming.
    */
   private spawnClaude(
     systemPrompt: string,
     prompt: string,
     onStream?: (chunk: string) => void,
   ): Promise<string> {
+    const { ClaudeStreamParser } = require('./stream-parsers/claude-stream-parser');
+
     return new Promise((resolve, reject) => {
       const args = [
         '--print',
-        '--output-format', 'text',
+        '--output-format', 'stream-json',
+        '--verbose',
         '--system-prompt', systemPrompt,
         '--model', this.model,
         '--max-turns', '20',
@@ -126,8 +125,6 @@ export class ClaudeCliAdapter implements TransportAdapter {
         args.push('--effort', this.effort);
       }
 
-      // Pass prompt as the CLI argument for short prompts,
-      // pipe via stdin for long ones to avoid OS ARG_MAX
       const useStdin = Buffer.byteLength(prompt, 'utf8') > 100000;
       if (!useStdin) {
         args.push(prompt);
@@ -136,24 +133,26 @@ export class ClaudeCliAdapter implements TransportAdapter {
       const proc = spawn(this.cli.resolveBinary(), args, {
         cwd: this.cwd,
         env: { ...process.env, FORCE_COLOR: '0' },
-        timeout: 180000,
+        timeout: 300000,
         stdio: useStdin ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
       });
 
-      // Pipe prompt via stdin if needed
       if (useStdin && proc.stdin) {
         proc.stdin.write(prompt);
         proc.stdin.end();
       }
 
-      let fullText = '';
       let stderr = '';
 
+      // Use stream parser to extract text from structured events
+      const parser = new ClaudeStreamParser(`cli-${Date.now()}`, (event: any) => {
+        if (event.data?.kind === 'text_delta' && onStream) {
+          onStream(event.data.text);
+        }
+      });
+
       proc.stdout?.on('data', (data: Buffer) => {
-        // Text mode — pass through directly and accumulate
-        const text = data.toString();
-        fullText += text;
-        onStream?.(text);
+        parser.feed(data.toString());
       });
 
       proc.stderr?.on('data', (data: Buffer) => {
@@ -161,7 +160,8 @@ export class ClaudeCliAdapter implements TransportAdapter {
       });
 
       proc.on('close', (code: number | null) => {
-        // code 143 = SIGTERM (normal kill), code 137 = SIGKILL — not real errors
+        parser.flush();
+        const fullText = parser.getFullText();
         if (code === 0 || fullText || code === 143 || code === 137) {
           resolve(fullText);
         } else {
