@@ -507,6 +507,7 @@ Provide your feedback. Agree if the approach is solid, or suggest specific impro
     const codeGenPrompt = `Based on the debate consensus, generate the final implementation code.
 
 User request: "${session.prompt}"
+Project path: ${session.projectPath}
 
 Final agreed approach (Claude):
 ${lastClaudeMsg?.content || ''}
@@ -514,13 +515,18 @@ ${lastClaudeMsg?.content || ''}
 Reviewer feedback (Codex):
 ${lastCodexMsg?.content || ''}
 
-Generate the complete implementation. For each file, use this format:
+You MUST output the complete implementation code directly in your response.
+Do NOT say "let me write" or "I will create" — just output the actual code.
+Do NOT use tools or try to write files — output everything as text in your response.
+
+For each file, use EXACTLY this format:
+
 --- FILE: path/to/file.ts ---
 \`\`\`typescript
-// code here
+// complete file content here
 \`\`\`
 
-Only output the final code files, no explanations needed.`;
+Output ALL files needed for the implementation. No explanations, just code files.`;
 
     const codeMsg: DebateMessage = {
       id: uuidv4(),
@@ -531,7 +537,7 @@ Only output the final code files, no explanations needed.`;
     this.emit(codeMsg, debateId);
 
     const codeResponse = await this.ai.askClaude(
-      'You are a code generator. Output only clean, production-ready code files.',
+      `You are a code generator inside debaterAI. You MUST output complete, production-ready code files directly in your response using the --- FILE: path --- format. Do NOT attempt to use tools, write files, or execute commands. Do NOT say "let me write" — just output the code. Every file must be complete and ready to save.`,
       [{ role: 'user', content: codeGenPrompt }],
       (chunk) => {
         codeMsg.content += chunk;
