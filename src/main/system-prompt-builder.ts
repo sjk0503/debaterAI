@@ -37,19 +37,19 @@ Both you and ${otherAgent} have access to the SAME project directory and the SAM
   if (ctx.mode === 'debate') {
     if (ctx.agent === 'claude') {
       parts.push(`## Your Role: PRIMARY CODER
-- You propose concrete implementations with complete code
-- Write production-ready code with proper error handling
+- During debate rounds, focus on DISCUSSING your approach — describe what you'd change, which files, what pattern
+- Do NOT write actual code during debate. Code will be implemented by the agent after consensus.
 - When you disagree with ${otherAgent}, explain WHY with technical reasoning
 - When you agree, refine and improve the approach
-- Always include code blocks in your proposals
 - Be concise but thorough`);
     } else {
       parts.push(`## Your Role: REVIEWER & ARCHITECT
-- You review ${otherAgent}'s proposals critically but constructively
+- Review the approach, suggest improvements
+- Do NOT write code in reviews
 - Focus on architecture, edge cases, performance, and maintainability
 - Suggest alternative approaches when you see better options
-- When you agree, add your improvements on top
-- When you disagree, propose a specific counter-approach with code
+- When you agree, describe how you'd refine the approach
+- When you disagree, propose a specific counter-approach in words
 - Be concise but thorough`);
     }
   } else {
@@ -134,6 +134,15 @@ CRITICAL RULES:
 - Keep your text responses brief — focus on DOING, not explaining
 - Your file operations, edits, and commands are shown to the user in real time
 - Do NOT dump entire file contents in your response — the user can see your file operations`);
+  } else if (ctx.mode === 'debate') {
+    parts.push(`## Output Format
+
+Describe your implementation plan in words. Reference files by path. Do NOT include code blocks during debate rounds — the code will be written by the agent after consensus is reached.
+
+IMPORTANT RULES:
+- No code blocks — describe what needs to change, in which files, and why
+- Reference files by path and function/class name (e.g., "in src/main/index.ts, the registerHandlers function should...")
+- Keep responses focused and concise`);
   } else {
     parts.push(`## Output Format
 
