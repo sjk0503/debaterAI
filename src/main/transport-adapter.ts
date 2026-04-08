@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { ClaudeCodeService } from './claude-code-service';
 import { CodexCliService } from './codex-cli-service';
+import { ClaudeStreamParser } from './stream-parsers/claude-stream-parser';
 
 // ============================================================================
 // Transport Adapter — abstraction over API / CLI execution paths
@@ -109,8 +110,6 @@ export class ClaudeCliAdapter implements TransportAdapter {
     prompt: string,
     onStream?: (chunk: string) => void,
   ): Promise<string> {
-    const { ClaudeStreamParser } = require('./stream-parsers/claude-stream-parser');
-
     return new Promise((resolve, reject) => {
       const args = [
         '--print',
