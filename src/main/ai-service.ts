@@ -65,12 +65,17 @@ export class AIService {
   private projectPath: string = '';
   private cachedClaudeCliStatus: CliStatus = 'error';
   private cachedCodexCliStatus: CliStatus = 'error';
+  private readyPromise: Promise<void>;
 
   constructor(claudeCode?: ClaudeCodeService, codexCli?: CodexCliService) {
     this.claudeCode = claudeCode || new ClaudeCodeService();
     this.codexCli = codexCli || new CodexCliService();
     this.initClients();
-    this.refreshCliStatuses();
+    this.readyPromise = this.refreshCliStatuses();
+  }
+
+  async whenReady(): Promise<void> {
+    return this.readyPromise;
   }
 
   private async refreshCliStatuses() {
@@ -193,6 +198,7 @@ export class AIService {
   // ============================================================================
 
   async getProviderStatus(): Promise<{ claude: ProviderStatus; codex: ProviderStatus }> {
+    await this.readyPromise;
     const settings = this.getSettings();
 
     let claudeStatus: ProviderStatus;

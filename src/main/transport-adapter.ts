@@ -161,9 +161,13 @@ export class ClaudeCliAdapter implements TransportAdapter {
       proc.on('close', (code: number | null) => {
         parser.flush();
         const fullText = parser.getFullText();
-        if (code === 0 || fullText || code === 143 || code === 137) {
+        if (code === 143 || code === 137) {
+          // SIGTERM/SIGKILL = cancelled, resolve with whatever we have
+          resolve(fullText);
+        } else if (code === 0) {
           resolve(fullText);
         } else {
+          // Real error — reject even if there's partial text
           reject(new Error(`Claude CLI exited with code ${code}: ${stderr}`));
         }
       });
@@ -376,9 +380,13 @@ export class CodexCliAdapter implements TransportAdapter {
           }
         }
 
-        if (code === 0 || fullText || code === 143 || code === 137) {
+        if (code === 143 || code === 137) {
+          // SIGTERM/SIGKILL = cancelled, resolve with whatever we have
+          resolve(fullText);
+        } else if (code === 0) {
           resolve(fullText);
         } else {
+          // Real error — reject even if there's partial text
           reject(new Error(`Codex CLI exited with code ${code}: ${stderr}`));
         }
       });

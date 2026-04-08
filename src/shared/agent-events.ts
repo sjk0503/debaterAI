@@ -7,6 +7,8 @@
 
 export type AgentProvider = 'claude' | 'codex';
 
+export type AgentTerminalStatus = 'success' | 'error' | 'cancelled' | 'timeout';
+
 export type AgentEventType =
   | 'text_delta'       // streaming text chunk
   | 'text_done'        // full text block complete
@@ -109,6 +111,7 @@ export interface AgentStartData {
 export interface AgentDoneData {
   kind: 'agent_done';
   exitCode: number;
+  status: AgentTerminalStatus;
   totalText: string;
   filesChanged: string[];
   toolsUsed: string[];

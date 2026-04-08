@@ -19,10 +19,18 @@ export function reconstructMessages(events: SessionEvent[]): ReconstructResult {
 
   const flushAgent = () => {
     if (currentAgentRole && (currentAgentText || currentAgentEvents.length > 0)) {
+      // Check if the last event indicates cancellation or error
+      const lastEvent = currentAgentEvents[currentAgentEvents.length - 1];
+      const agentStatus = lastEvent?.data?.kind === 'agent_done' ? lastEvent.data.status : undefined;
+
       messages.push({
         id: `reconstructed-${messages.length}`,
         role: currentAgentRole,
-        content: currentAgentText,
+        content: agentStatus === 'cancelled'
+          ? currentAgentText || '(cancelled)'
+          : agentStatus === 'error'
+            ? currentAgentText || '(error)'
+            : currentAgentText,
         timestamp: currentAgentEvents[0]?.timestamp || Date.now(),
         round: currentRound || undefined,
         agentEvents: currentAgentEvents.length > 0 ? [...currentAgentEvents] : undefined,
