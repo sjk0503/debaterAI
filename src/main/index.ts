@@ -12,6 +12,7 @@ import { AppReadiness, ReadinessAction } from '../shared/types';
 import { AgentRuntime } from './agent-runtime';
 import { Orchestrator } from './orchestrator';
 import { SessionStore } from './session-store';
+import { CheckpointService } from './checkpoint-service';
 
 let mainWindow: BrowserWindow | null = null;
 let debateEngine: DebateEngine | null = null;
@@ -59,6 +60,7 @@ function setupIPC() {
   debateEngine = new DebateEngine(aiService, sessionStore);
   agentRuntime = new AgentRuntime();
   orchestrator = new Orchestrator(agentRuntime, gitService, sessionStore);
+  const checkpointService = new CheckpointService();
 
   // ============================================================================
   // Agent Runtime — spawn full CLI agents
@@ -117,6 +119,21 @@ function setupIPC() {
   ipcMain.handle('orchestrator:tasks', async (_event, { sessionId }) => {
     if (!orchestrator) return [];
     return orchestrator.getTaskManager().getForSession(sessionId);
+  });
+
+  // ============================================================================
+  // Checkpoints
+  // ============================================================================
+  ipcMain.handle('checkpoint:create', async (_event, { projectPath, description }) => {
+    return checkpointService.create(projectPath, description);
+  });
+
+  ipcMain.handle('checkpoint:rollback', async (_event, { checkpointId }) => {
+    return checkpointService.rollback(checkpointId);
+  });
+
+  ipcMain.handle('checkpoint:list', async (_event, { projectPath }) => {
+    return checkpointService.listForProject(projectPath);
   });
 
   // ============================================================================

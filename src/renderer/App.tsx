@@ -7,6 +7,7 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { PanelLayout } from './components/PanelLayout';
 import { SettingsModal } from './components/SettingsModal';
 import { PermissionModal } from './components/PermissionModal';
+import { OnboardingWizard } from './components/OnboardingWizard';
 import { DiffView } from './components/DiffView';
 import { DebateMessage, DebateMode, AppReadiness } from '../shared/types';
 
@@ -62,6 +63,9 @@ export default function App() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessionRefresh, setSessionRefresh] = useState(0);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return !localStorage.getItem('debaterai-onboarded');
+  });
 
   const { openFile, openInEditor, clearFile } = useEditorTabs();
 
@@ -90,17 +94,13 @@ export default function App() {
     });
 
     const handleKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
-        e.preventDefault();
-        setShowSidebar((p) => !p);
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
-        e.preventDefault();
-        setShowSettings(true);
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === '`') {
-        e.preventDefault();
-        setShowTerminal((p) => !p);
+      if (!(e.metaKey || e.ctrlKey)) return;
+      switch (e.key) {
+        case 'b': e.preventDefault(); setShowSidebar((p) => !p); break;
+        case ',': e.preventDefault(); setShowSettings(true); break;
+        case '`': e.preventDefault(); setShowTerminal((p) => !p); break;
+        case 'n': e.preventDefault(); handleNewSession(); break;
+        case 'd': case 'D': if (e.shiftKey) { e.preventDefault(); handleShowDiff(); } break;
       }
     };
     window.addEventListener('keydown', handleKey);
@@ -112,6 +112,15 @@ export default function App() {
       window.removeEventListener('keydown', handleKey);
     };
   }, []);
+
+  const handleNewSession = () => {
+    // Kill any running agents before starting fresh
+    window.api.killAllAgents?.().catch(() => {});
+    setMessages([]);
+    setStatus('idle');
+    setCurrentSessionId(null);
+    setSessionRefresh((v) => v + 1);
+  };
 
   const handleFileSelect = (filePath: string) => {
     setSelectedFile(filePath);
@@ -253,6 +262,7 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-1">
+          <TitleButton onClick={handleNewSession}>New</TitleButton>
           {projectPath && (
             <TitleButton onClick={handleShowDiff}>Diff</TitleButton>
           )}
@@ -278,6 +288,21 @@ export default function App() {
         showBottom={showTerminal}
         showRight={rightPanel !== null}
       />
+
+      {/* Onboarding */}
+      {showOnboarding && (
+        <OnboardingWizard
+          onComplete={(dir) => {
+            setProjectPath(dir);
+            setShowOnboarding(false);
+            localStorage.setItem('debaterai-onboarded', '1');
+          }}
+          onSkip={() => {
+            setShowOnboarding(false);
+            localStorage.setItem('debaterai-onboarded', '1');
+          }}
+        />
+      )}
 
       {/* Modals */}
       {showSettings && (

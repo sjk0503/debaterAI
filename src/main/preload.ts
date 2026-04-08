@@ -13,6 +13,14 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeAllListeners('agent:event');
   },
 
+  // ── Checkpoints ─────────────────────────────────────────────────────────
+  createCheckpoint: (projectPath: string, description: string) =>
+    ipcRenderer.invoke('checkpoint:create', { projectPath, description }),
+  rollbackCheckpoint: (checkpointId: string) =>
+    ipcRenderer.invoke('checkpoint:rollback', { checkpointId }),
+  listCheckpoints: (projectPath: string) =>
+    ipcRenderer.invoke('checkpoint:list', { projectPath }),
+
   // ── Orchestrator ─────────────────────────────────────────────────────────
   startParallelDebate: (opts: any) =>
     ipcRenderer.invoke('orchestrator:startParallel', opts),
