@@ -12,6 +12,13 @@ import {
   getModel,
 } from '../shared/models';
 import { ClaudeCodeService } from './claude-code-service';
+import {
+  TransportAdapter,
+  TransportMessage,
+  ClaudeApiAdapter,
+  ClaudeCliAdapter,
+  OpenAIApiAdapter,
+} from './transport-adapter';
 
 const store = new Store({
   defaults: {
@@ -52,10 +59,22 @@ export class AIService {
   private claude: Anthropic | null = null;
   private openai: OpenAI | null = null;
   private claudeCode: ClaudeCodeService;
+  private projectPath: string = '';
+  private cachedCliStatus: CliStatus = 'error';
 
   constructor(claudeCode?: ClaudeCodeService) {
     this.claudeCode = claudeCode || new ClaudeCodeService();
     this.initClients();
+    // Pre-check CLI status asynchronously
+    this.refreshCliStatus();
+  }
+
+  private async refreshCliStatus() {
+    this.cachedCliStatus = await this.getClaudeCliStatus();
+  }
+
+  setProjectPath(path: string) {
+    this.projectPath = path;
   }
 
   private initClients() {
@@ -90,16 +109,83 @@ export class AIService {
     return { success: true };
   }
 
-  /**
-   * Provider readiness status
-   */
+  // ============================================================================
+  // Transport Adapter resolution
+  // ============================================================================
+
+  private getClaudeAdapter(): TransportAdapter {
+    const settings = this.getSettings();
+
+    if (settings.claude.selectedTransport === 'cli') {
+      return new ClaudeCliAdapter(
+        this.claudeCode,
+        settings.claude.model,
+        this.projectPath || process.cwd(),
+      );
+    }
+
+    if (!this.claude) {
+      throw new Error('Claude not configured. Add API key in settings.');
+    }
+
+    return new ClaudeApiAdapter(
+      this.claude,
+      settings.claude.model,
+      settings.claude.maxTokens || 8192,
+      settings.claude.temperature ?? 0.3,
+    );
+  }
+
+  private getCodexAdapter(): TransportAdapter {
+    const settings = this.getSettings();
+
+    // Codex is API-only for now
+    if (!this.openai) {
+      throw new Error('OpenAI not configured. Add API key in settings.');
+    }
+
+    return new OpenAIApiAdapter(
+      this.openai,
+      settings.codex.model,
+      settings.codex.maxTokens || 8192,
+      settings.codex.temperature ?? 0.3,
+      settings.codex.reasoningEffort,
+    );
+  }
+
+  // ============================================================================
+  // Public API — delegates to transport adapters
+  // ============================================================================
+
+  async askClaude(
+    systemPrompt: string,
+    messages: TransportMessage[],
+    onStream?: (chunk: string) => void,
+  ): Promise<string> {
+    const adapter = this.getClaudeAdapter();
+    return adapter.ask(systemPrompt, messages, onStream);
+  }
+
+  async askCodex(
+    systemPrompt: string,
+    messages: TransportMessage[],
+    onStream?: (chunk: string) => void,
+  ): Promise<string> {
+    const adapter = this.getCodexAdapter();
+    return adapter.ask(systemPrompt, messages, onStream);
+  }
+
+  // ============================================================================
+  // Provider readiness
+  // ============================================================================
+
   async getProviderStatus(): Promise<{ claude: ProviderStatus; codex: ProviderStatus }> {
     const settings = this.getSettings();
 
-    // Claude status
     let claudeStatus: ProviderStatus;
     if (settings.claude.selectedTransport === 'cli') {
       const cliStatus = await this.getClaudeCliStatus();
+      this.cachedCliStatus = cliStatus;
       claudeStatus = {
         provider: 'claude',
         selectedTransport: 'cli',
@@ -127,7 +213,6 @@ export class AIService {
       };
     }
 
-    // Codex status — API only for now
     const codexStatus: ProviderStatus = {
       provider: 'codex',
       selectedTransport: 'api',
@@ -152,100 +237,11 @@ export class AIService {
     }
   }
 
-  /**
-   * Claude에게 메시지 보내기
-   */
-  async askClaude(
-    systemPrompt: string,
-    messages: { role: 'user' | 'assistant'; content: string }[],
-    onStream?: (chunk: string) => void,
-  ): Promise<string> {
-    if (!this.claude) throw new Error('Claude not configured. Add API key in settings.');
-
-    const settings = this.getSettings();
-
-    if (onStream) {
-      const stream = this.claude.messages.stream({
-        model: settings.claude.model,
-        max_tokens: settings.claude.maxTokens || 8192,
-        temperature: settings.claude.temperature ?? 0.3,
-        system: systemPrompt,
-        messages,
-      });
-
-      let fullText = '';
-      for await (const event of stream) {
-        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-          fullText += event.delta.text;
-          onStream(event.delta.text);
-        }
-      }
-      return fullText;
-    } else {
-      const response = await this.claude.messages.create({
-        model: settings.claude.model,
-        max_tokens: settings.claude.maxTokens || 8192,
-        temperature: settings.claude.temperature ?? 0.3,
-        system: systemPrompt,
-        messages,
-      });
-
-      return response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map((block) => block.text)
-        .join('');
-    }
-  }
-
-  /**
-   * Codex(GPT)에게 메시지 보내기
-   */
-  async askCodex(
-    systemPrompt: string,
-    messages: { role: 'user' | 'assistant'; content: string }[],
-    onStream?: (chunk: string) => void,
-  ): Promise<string> {
-    if (!this.openai) throw new Error('OpenAI not configured. Add API key in settings.');
-
-    const settings = this.getSettings();
-    const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: 'system', content: systemPrompt },
-      ...messages.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      })),
-    ];
-
-    const requestParams: any = {
-      model: settings.codex.model,
-      messages: openaiMessages,
-      max_completion_tokens: settings.codex.maxTokens || 8192,
-      temperature: settings.codex.temperature ?? 0.3,
-    };
-
-    // Add reasoning_effort if configured
-    if (settings.codex.reasoningEffort && settings.codex.reasoningEffort !== 'none') {
-      requestParams.reasoning_effort = settings.codex.reasoningEffort;
-    }
-
-    if (onStream) {
-      requestParams.stream = true;
-      const stream = await this.openai.chat.completions.create(requestParams);
-
-      let fullText = '';
-      for await (const chunk of stream as any) {
-        const delta = chunk.choices[0]?.delta?.content || '';
-        fullText += delta;
-        onStream(delta);
-      }
-      return fullText;
-    } else {
-      const response = await this.openai.chat.completions.create(requestParams);
-      return (response as any).choices[0]?.message?.content || '';
-    }
-  }
-
   isClaudeReady(): boolean {
+    const settings = this.getSettings();
+    if (settings.claude.selectedTransport === 'cli') {
+      return this.cachedCliStatus === 'configured';
+    }
     return this.claude !== null;
   }
 
@@ -263,7 +259,6 @@ function normalizeSettings(raw: any): AISettings {
 
   // --- Claude ---
   if (!settings.claude) settings.claude = {} as any;
-  // Migrate legacy authType/oauthToken
   const rawClaude = raw?.claude || {};
   if (rawClaude.oauthToken && !rawClaude.apiKey) {
     settings.claude.apiKey = rawClaude.oauthToken;
@@ -271,7 +266,6 @@ function normalizeSettings(raw: any): AISettings {
   delete (settings.claude as any).authType;
   delete (settings.claude as any).oauthToken;
   if (!settings.claude.selectedTransport) settings.claude.selectedTransport = 'api';
-  // Migrate legacy model
   settings.claude.model = migrateModel(settings.claude.model, DEFAULT_CLAUDE_MODEL, 'anthropic');
 
   // --- Codex ---
@@ -288,7 +282,6 @@ function normalizeSettings(raw: any): AISettings {
 
   // --- Debate ---
   if (!settings.debate) settings.debate = {} as any;
-  // Migrate mode → preferredMode
   if ((settings.debate as any).mode && !settings.debate.preferredMode) {
     settings.debate.preferredMode = (settings.debate as any).mode;
   }
@@ -301,11 +294,8 @@ function normalizeSettings(raw: any): AISettings {
 
 function migrateModel(current: string, defaultModel: string, provider: 'anthropic' | 'openai'): string {
   if (!current) return defaultModel;
-  // Check if it's a known legacy model
   if (LEGACY_MODEL_MAP[current]) return LEGACY_MODEL_MAP[current];
-  // Check if it's a valid current model
   const known = ALL_MODELS.find((m) => m.id === current && m.provider === provider);
   if (known) return current;
-  // Unknown model — fallback to default
   return defaultModel;
 }

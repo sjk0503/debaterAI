@@ -110,6 +110,9 @@ function setupIPC() {
       mainWindow?.webContents.send('debate:status', status);
     });
 
+    // Set project path for CLI adapter
+    aiService.setProjectPath(projectPath);
+
     // 프로젝트 컨텍스트 수집 → AI에게 전달
     let projectContext = '';
     try {
