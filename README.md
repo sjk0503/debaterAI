@@ -1,152 +1,191 @@
-# 🤖⚔️🤖 debaterAI
+# debaterAI
 
 **AI agents debate and code together.**
 
-Claude와 Codex(GPT)가 실시간으로 토론하며 최적의 코드를 만들어내는 Mac 데스크톱 앱.
+Claude와 Codex(GPT)가 실시간으로 토론한 뒤, 합의된 방향으로 에이전트가 직접 코드를 수정하는 macOS 데스크톱 앱.
 
-![debaterAI UI](docs/screenshot-placeholder.png)
-
-## ✨ 핵심 기능
+## 핵심 기능
 
 | 기능 | 설명 |
 |------|------|
-| 🔥 **AI 토론** | Claude와 Codex가 서로 의견을 나누며 최적의 구현 방법을 찾음 |
-| 🤝 **합의 기반 개발** | 두 AI가 합의에 도달하면 코드 생성 |
-| 👀 **실시간 관전** | 토론 과정을 채팅 형태로 실시간 확인 |
-| 📁 **프로젝트 컨텍스트** | 파일 구조와 코드를 AI에게 자동 전달 |
-| 🔒 **권한 시스템** | Claude Code 스타일 승인/거부/항상허용 |
-| 📦 **Git 워크트리** | 토론별 격리된 브랜치에서 안전하게 작업 |
-| 💻 **Monaco Editor** | VS Code 에디터 엔진으로 코드 뷰 |
-| 🔍 **코드 검색** | grep, 파일 검색, diff 뷰 |
+| **AI 토론** | Claude와 Codex가 접근법을 논의하고 합의 도달 |
+| **에이전트 모드** | 합의 후 AI가 직접 파일 읽기/수정/터미널 실행 (텍스트 출력이 아닌 실제 작업) |
+| **실시간 활동 표시** | 에이전트가 어떤 파일을 읽고 수정하는지 실시간 확인 |
+| **슬래쉬 커맨드** | `/help`, `/diff`, `/checkpoint`, `/rollback` 등 14개 내장 명령 |
+| **세션 관리** | 이전 토론 클릭하면 대화 내역 복원 |
+| **자동 체크포인트** | 코드 적용 전 git 스냅샷 생성, `/rollback`으로 복원 |
+| **권한 시스템** | Claude Code 스타일 승인/거부/항상허용 |
+| **Monaco Editor** | VS Code 에디터 엔진으로 코드 뷰 + diff |
 
-## 🚀 설치
+## 설치 및 실행
 
-### DMG 설치 (권장)
-1. [Releases](https://github.com/sjk0503/debaterAI/releases) 페이지에서 최신 DMG 다운로드
-2. `debaterAI-arm64.dmg` (M1/M2/M3) 또는 `debaterAI-x64.dmg` (Intel) 선택
-3. 앱을 Applications 폴더로 드래그
-4. 처음 실행 시 System Preferences → Security에서 허용
+### 요구 사항
 
-### 소스 빌드
+- **Node.js 18+** / npm 9+
+- **macOS 12+** (Monterey 이상)
+- **Claude CLI** 설치 + 로그인
+- **OpenAI API Key** 또는 **Codex CLI** (토론 모드용)
+
+### 1. 프로젝트 클론 및 설치
+
 ```bash
 git clone https://github.com/sjk0503/debaterAI.git
 cd debaterAI
 npm install
-npm run dev
 ```
 
-## ⚙️ 초기 설정
-
-1. 앱 실행 후 **⚙️ Settings** 클릭
-2. Claude API Key 또는 OAuth 로그인 설정
-3. OpenAI API Key 설정 (Codex 토론용)
-4. 프로젝트 폴더 선택 후 토론 시작!
-
-### 지원 모델
-
-**Claude (Anthropic)**
-- 👑 Claude Opus 4.6 (1M context) — 최고 성능
-- ⚡ Claude Sonnet 4 — 균형 (기본값 추천)
-- 🚀 Claude Haiku 3.5 — 빠른 응답
-
-**Codex / GPT (OpenAI)**
-- 👑 GPT-4.1 (1M context)
-- ⚡ GPT-4o — 기본값 추천
-- 👑 o3 — 추론 특화
-- 🚀 GPT-4o Mini
-
-## 💬 토론 모드
-
-| 모드 | 설명 |
-|------|------|
-| **Debate** | Claude ↔ Codex 토론 → 합의 → 코드 생성 |
-| **Claude Only** | Claude 단독으로 코딩 |
-| **Codex Only** | GPT 단독으로 코딩 |
-
-## 📁 Git 워크트리
-
-```
-프로젝트/                         ../.debaterai-worktrees/
-├── .git/                         ├── debate-a1b2/  ← 로그인 기능
-├── src/                          ├── debate-c3d4/  ← 대시보드
-└── ...                           └── debate-e5f6/  ← API 리팩토링
-```
-
-각 토론이 독립된 브랜치에서 진행 → 충돌 없음 → 완료 시 메인 브랜치에 머지.
-
-## 🛠️ 개발 환경
-
-**요구 사항**
-- Node.js 18+
-- npm 9+
-- macOS 12+ (Monterey 이상)
+### 2. Claude CLI 설치 (필수)
 
 ```bash
-# 의존성 설치
-npm install
+npm install -g @anthropic-ai/claude-code
+claude login
+```
 
-# 개발 모드 실행
+### 3. Codex CLI 설치 (토론 모드 사용 시)
+
+```bash
+npm install -g @openai/codex
+```
+
+PATH에 안 잡히면 `~/.zshrc`에 추가:
+```bash
+export PATH="$HOME/.npm-global/bin:$PATH"
+```
+
+### 4. 실행
+
+```bash
+# 빌드 후 실행
+npm run build && npx electron .
+
+# 또는 개발 모드 (핫 리로드)
 npm run dev
-
-# 프로덕션 빌드
-npm run build
-
-# DMG 패키징 (arm64)
-npm run package:arm64
-
-# DMG 패키징 (Universal - arm64 + x64)
-npm run package
 ```
 
-## 📂 프로젝트 구조
+### 5. 초기 설정
+
+1. 앱 실행 → 온보딩 위저드에서 CLI 상태 확인
+2. **Settings** 클릭 → API Key 또는 CLI 로그인 설정
+3. 프로젝트 폴더 선택 (Browse 버튼)
+4. 모드 선택 후 프롬프트 입력
+
+## 사용 방법
+
+### 토론 모드 (Debate)
+
+Claude와 Codex가 접근법을 토론합니다. 토론 중에는 코드를 작성하지 않고 **방향만 논의**합니다. 합의에 도달하면 Claude 에이전트가 직접 파일을 수정합니다.
+
+1. 모드를 **Debate**으로 선택
+2. 프롬프트 입력 (예: "로그인 기능 추가해줘")
+3. Claude가 제안 → Codex가 리뷰 → 최대 3라운드 토론
+4. 합의 도달 시 에이전트가 직접 코드 수정
+5. 완료 후 **Diff 보기** 버튼으로 변경 사항 확인
+
+### 솔로 모드 (Claude Only / Codex Only)
+
+하나의 AI 에이전트가 직접 프로젝트 파일을 읽고 수정합니다. Claude Code처럼 동작합니다.
+
+1. 모드를 **Claude Only** 또는 **Codex Only**로 선택
+2. 프롬프트 입력
+3. 에이전트가 파일 읽기 → 수정 → 터미널 실행을 자동으로 수행
+4. 실시간 활동 표시 (ActivityBar)에서 진행 상황 확인
+
+### 키보드 단축키
+
+| 단축키 | 동작 |
+|--------|------|
+| `Enter` | 메시지 전송 |
+| `Shift+Enter` | 줄바꿈 |
+| `Cmd+B` | 사이드바 토글 |
+| `Cmd+,` | 설정 열기 |
+| `Cmd+`` ` | 터미널 토글 |
+| `Cmd+N` | 새 세션 |
+| `Cmd+Shift+D` | Git diff 보기 |
+
+### 슬래쉬 커맨드
+
+입력창에 `/`를 치면 자동완성 팔레트가 표시됩니다. 방향키로 이동, Enter/Tab으로 선택.
+
+| 커맨드 | 설명 |
+|--------|------|
+| `/debate` | 토론 모드 전환 |
+| `/solo <claude\|codex>` | 솔로 모드 전환 |
+| `/clear` | 대화 초기화 |
+| `/apply` | 생성된 코드 적용 (텍스트 모드 전용) |
+| `/diff` | 현재 git diff 표시 |
+| `/status` | 프로바이더 상태 확인 |
+| `/context` | 프로젝트 컨텍스트 표시 |
+| `/files` | 파일 트리 표시 |
+| `/rounds <n>` | 최대 토론 라운드 설정 |
+| `/model <provider> <model>` | 모델 변경 |
+| `/checkpoint` | git 체크포인트 생성 |
+| `/rollback` | 마지막 체크포인트로 복원 |
+| `/history` | 세션 히스토리 |
+| `/help` | 전체 커맨드 목록 |
+
+### 세션 관리
+
+- 왼쪽 사이드바 **Sessions** 탭에서 이전 토론 확인
+- 세션 클릭 → 대화 내역 복원 (모드, 프로젝트 경로도 복원)
+- 우클릭 → 삭제
+- 진행 중인 세션은 펄스 애니메이션 표시
+
+### 토론 중단
+
+진행 중 빨간 **Stop** 버튼을 클릭하면 즉시 중단됩니다. 중단 후 새 프롬프트를 입력하면 새 토론이 시작됩니다.
+
+## 지원 모델
+
+**Claude (Anthropic)**
+- Claude Opus 4.6 (1M context)
+- Claude Sonnet 4.6 (기본값)
+- Claude Haiku 4.5
+
+**OpenAI**
+- GPT-5.4 (1.05M context)
+- GPT-5.4 Mini (기본값)
+- GPT-5.4 Nano
+
+## 아키텍처
+
+### 토론 흐름
 
 ```
-debaterAI/
-├── src/
-│   ├── main/                    # Electron 메인 프로세스
-│   │   ├── index.ts             # 앱 진입점 + IPC 핸들러
-│   │   ├── debate-engine.ts     # 🔥 AI 토론 엔진 (핵심)
-│   │   ├── ai-service.ts        # Claude + OpenAI API
-│   │   ├── claude-code-service.ts # Claude Code CLI 연동
-│   │   ├── git-service.ts       # Git 워크트리 + 브랜치
-│   │   ├── terminal-service.ts  # 명령 실행
-│   │   ├── search-service.ts    # grep + 파일 검색
-│   │   ├── permission-service.ts # 권한 시스템
-│   │   └── preload.ts           # IPC 브릿지
-│   ├── renderer/                # React UI
-│   │   ├── App.tsx              # 메인 레이아웃
-│   │   └── components/
-│   │       ├── DebatePanel.tsx  # 토론 채팅 패널
-│   │       ├── MarkdownMessage.tsx # 마크다운 + 코드 하이라이팅
-│   │       ├── CodeView.tsx     # Monaco Editor
-│   │       ├── DiffView.tsx     # Git diff 뷰어
-│   │       ├── FileExplorer.tsx # 파일 탐색기
-│   │       ├── SettingsModal.tsx # 설정 (6탭)
-│   │       └── PermissionModal.tsx # 권한 요청 UI
-│   └── shared/
-│       ├── types.ts             # 공통 타입
-│       └── models.ts            # AI 모델 레지스트리
-├── docs/
-│   ├── DESIGN.md                # 설계 문서
-│   └── USAGE.md                 # 상세 사용법
-├── build/
-│   └── entitlements.mac.plist   # Mac 권한 설정
-└── electron-builder.yml         # 패키징 설정
+프롬프트 입력
+  ↓
+[Debate 모드]                    [Solo 모드]
+  Round 1~N: 텍스트 토론            에이전트 직접 실행
+  Claude 제안 → Codex 리뷰           ↓
+  합의/최대 라운드 도달            파일 읽기/수정/터미널
+  ↓                                 ↓
+  에이전트가 합의 기반 구현        완료 → Diff 확인
+  ↓
+  완료 → Diff 확인
 ```
 
-## 🔐 보안
+### 데이터 저장 위치
 
-- AI API 키는 로컬 encrypted store에만 저장
-- 파일 접근/명령 실행은 권한 시스템으로 제어
-- Claude Code 스타일 승인/거부/항상허용
-- Git 워크트리로 원본 코드 보호
+| 데이터 | 위치 |
+|--------|------|
+| 세션 기록 | `~/.debaterai/sessions/` (JSONL + meta.json) |
+| 설정/API 키 | `~/Library/Application Support/debaterai/` (암호화) |
+| Git 워크트리 | `../.debaterai-worktrees/` (프로젝트 상위) |
 
-## 📜 라이선스
+### 기술 스택
+
+Electron 34 + React 19 + TypeScript 5.7 + Vite 6 + Tailwind CSS 3.4 + Monaco Editor
+
+## 개발
+
+```bash
+npm run dev          # 개발 모드 (핫 리로드)
+npm run build        # 프로덕션 빌드
+npm run start        # 빌드된 앱 실행
+npm run package      # macOS DMG 패키징 (universal)
+npm run package:arm64  # Apple Silicon 전용
+npm run package:x64    # Intel 전용
+```
+
+## 라이선스
 
 MIT
-
-## 🙏 레퍼런스
-
-- [Conductor](https://conductor.build) — 병렬 에이전트 UI 벤치마킹
-- [Emdash](https://github.com/generalaction/emdash) — 오픈소스 ADE 참고
-- [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) — 에이전트 오케스트레이션
