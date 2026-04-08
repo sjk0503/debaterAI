@@ -15,7 +15,7 @@ export function DiffView({ diff, onClose }: Props) {
         <button onClick={onClose} className="text-gray-500 hover:text-white text-sm px-1">✕</button>
       </div>
 
-      <div className="flex-1 overflow-auto bg-[#0d0d0d] p-0 font-mono text-xs">
+      <div className="flex-1 overflow-auto bg-[#0d0d0d] p-0 font-mono text-xs selectable-text">
         {lines.length === 0 && (
           <div className="p-4 text-gray-600 text-center">변경 사항이 없습니다.</div>
         )}

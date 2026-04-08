@@ -197,7 +197,7 @@ function setupIPC() {
   });
 
   // 토론 시작
-  ipcMain.handle('debate:start', async (_event, { prompt, projectPath, mode }) => {
+  ipcMain.handle('debate:start', async (_event, { prompt, projectPath, mode, sessionId }) => {
     if (!debateEngine || !mainWindow) return;
 
     // Use provided mode or fall back to preferred mode
@@ -226,7 +226,7 @@ function setupIPC() {
       console.warn('Failed to collect project context:', err);
     }
 
-    return debateEngine.startDebate(prompt, projectPath, projectContext, resolvedMode);
+    return debateEngine.startDebate(prompt, projectPath, projectContext, resolvedMode, sessionId);
   });
 
   // 토론 중 사용자 개입

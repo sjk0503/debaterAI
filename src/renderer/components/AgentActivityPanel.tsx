@@ -120,7 +120,7 @@ function ToolCard({ toolName, detail, output, isError, expanded, onToggle, color
         {isError && <span style={{ color: '#ef4444' }}>failed</span>}
       </button>
       {expanded && output && (
-        <div className="px-3 py-2 font-mono text-xs overflow-x-auto"
+        <div className="px-3 py-2 font-mono text-xs overflow-x-auto selectable-text"
           style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-0)', color: 'var(--text-3)', whiteSpace: 'pre-wrap', maxHeight: 200, overflowY: 'auto' }}>
           {output}
         </div>
@@ -141,7 +141,7 @@ function FileOpCard({ filePath, action, color }: {
       style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
       <span>{icon}</span>
       <span style={{ color }}>{label}</span>
-      <span className="font-mono truncate" style={{ color: 'var(--text-2)' }}>{filePath}</span>
+      <span className="font-mono truncate selectable-text" style={{ color: 'var(--text-2)' }}>{filePath}</span>
     </div>
   );
 }
@@ -160,13 +160,13 @@ function BashCard({ command, output, exitCode }: {
         className="w-full flex items-center gap-2 px-3 py-1.5 text-left font-mono"
       >
         <span style={{ color: success ? 'var(--codex)' : '#ef4444' }}>$</span>
-        <span className="truncate" style={{ color: 'var(--text-2)' }}>{command}</span>
+        <span className="truncate selectable-text" style={{ color: 'var(--text-2)' }}>{command}</span>
         {exitCode !== undefined && (
           <span style={{ color: success ? 'var(--text-3)' : '#ef4444' }}>exit {exitCode}</span>
         )}
       </button>
       {expanded && output && (
-        <div className="px-3 py-2 font-mono overflow-x-auto"
+        <div className="px-3 py-2 font-mono overflow-x-auto selectable-text"
           style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-0)', color: 'var(--text-3)', whiteSpace: 'pre-wrap', maxHeight: 200, overflowY: 'auto' }}>
           {output}
         </div>

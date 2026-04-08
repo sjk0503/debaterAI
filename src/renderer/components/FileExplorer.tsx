@@ -69,7 +69,7 @@ export function FileExplorer({ projectPath, onFileSelect, selectedFile }: Props)
           {!isDir && (
             <span style={{ color, fontSize: 6 }}>●</span>
           )}
-          <span className="truncate" style={{ fontFamily: 'inherit' }}>{item.name}</span>
+          <span className="truncate selectable-text" style={{ fontFamily: 'inherit' }}>{item.name}</span>
         </div>
         {isDir && isExpanded && item.children?.map((child) => renderItem(child, depth + 1))}
       </div>

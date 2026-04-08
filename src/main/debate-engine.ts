@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { AIService } from './ai-service';
 import { SessionStore } from './session-store';
+import { buildSystemPrompt } from './system-prompt-builder';
 import {
   DebateSession,
   DebateMessage,
@@ -11,42 +12,6 @@ import {
   AppReadiness,
   ModeStatus,
 } from '../shared/types';
-
-const CLAUDE_SYSTEM = `You are Claude, a senior software engineer participating in a code debate.
-Your role: PRIMARY CODER — you write the actual implementation.
-
-Rules:
-- Propose concrete implementation plans with code
-- When you disagree with Codex, explain WHY with technical reasoning
-- When you agree, say so clearly and refine the approach
-- Always include code blocks when proposing solutions
-- Be concise but thorough
-
-At the end of your response, add a line:
-[AGREEMENT: agree/partial/disagree]`;
-
-const CODEX_SYSTEM = `You are Codex, a senior software architect participating in a code debate.
-Your role: REVIEWER & ARCHITECT — you review plans and suggest improvements.
-
-Rules:
-- Review Claude's proposals critically but constructively
-- Suggest alternative approaches when you see better options
-- Focus on architecture, edge cases, performance, and maintainability
-- When you agree, add your improvements on top
-- When you disagree, propose a specific counter-approach with code
-- Be concise but thorough
-
-At the end of your response, add a line:
-[AGREEMENT: agree/partial/disagree]`;
-
-const CODEX_SOLO_SYSTEM = `You are Codex, a senior software engineer writing code directly.
-Your role: PRIMARY CODER — you implement the requested feature.
-
-Rules:
-- Propose concrete implementation plans with code
-- Include complete, production-ready code blocks
-- Consider edge cases, performance, and maintainability
-- Be concise but thorough`;
 
 export class DebateEngine {
   private sessions: Map<string, DebateSession> = new Map();
@@ -156,12 +121,12 @@ export class DebateEngine {
   /**
    * 토론 시작
    */
-  async startDebate(prompt: string, projectPath: string, projectContext?: string, mode?: string): Promise<string> {
+  async startDebate(prompt: string, projectPath: string, projectContext?: string, mode?: string, existingSessionId?: string): Promise<string> {
     const resolvedMode = (mode as any) || this.ai.getSettings().debate.preferredMode;
     const settings = this.ai.getSettings();
 
-    // Create persistent session
-    const debateId = this.sessionStore.create({
+    // Use existing session ID if provided (continuation), otherwise create a new one
+    const debateId = existingSessionId || this.sessionStore.create({
       prompt,
       projectPath,
       mode: resolvedMode,
@@ -254,8 +219,22 @@ export class DebateEngine {
       };
       this.emit(claudeMsg);
 
+      const claudeSystemPrompt = buildSystemPrompt({
+        agent: 'claude',
+        mode: session.mode,
+        round,
+        maxRounds: session.maxRounds,
+        projectPath: session.projectPath,
+        projectContext: session.projectContext,
+        previousRounds: session.rounds.map((r) => ({
+          claudeResponse: r.claudeResponse,
+          codexResponse: r.codexResponse,
+          agreement: r.agreement,
+        })),
+      });
+
       claudeResponse = await this.ai.askClaude(
-        CLAUDE_SYSTEM,
+        claudeSystemPrompt,
         [{ role: 'user', content: claudePrompt }],
         (chunk) => {
           claudeMsg.content += chunk;
@@ -279,8 +258,22 @@ export class DebateEngine {
       };
       this.emit(codexMsg);
 
+      const codexSystemPrompt = buildSystemPrompt({
+        agent: 'codex',
+        mode: session.mode,
+        round,
+        maxRounds: session.maxRounds,
+        projectPath: session.projectPath,
+        projectContext: session.projectContext,
+        previousRounds: session.rounds.map((r) => ({
+          claudeResponse: r.claudeResponse,
+          codexResponse: r.codexResponse,
+          agreement: r.agreement,
+        })),
+      });
+
       codexResponse = await this.ai.askCodex(
-        CODEX_SYSTEM,
+        codexSystemPrompt,
         [{ role: 'user', content: codexPrompt }],
         (chunk) => {
           codexMsg.content += chunk;
@@ -377,7 +370,15 @@ ${ctx ? `## Project Context\n${ctx}\n\n` : ''}Please implement this directly. Pr
 \`\`\``;
 
     const role = agent === 'claude' ? 'claude' as const : 'codex' as const;
-    const systemPrompt = agent === 'claude' ? CLAUDE_SYSTEM : CODEX_SOLO_SYSTEM;
+    const systemPrompt = buildSystemPrompt({
+      agent,
+      mode: session.mode,
+      round: 1,
+      maxRounds: 1,
+      projectPath: session.projectPath,
+      projectContext: session.projectContext,
+      previousRounds: [],
+    });
 
     const msg: DebateMessage = {
       id: uuidv4(),
@@ -449,10 +450,28 @@ Please address Codex's feedback and refine your implementation. If you agree wit
    * Codex 프롬프트 생성
    */
   private buildCodexPrompt(session: DebateSession, claudeResponse: string, round: number): string {
-    return `User request: "${session.prompt}"
+    const maxRespLen = 3000;
 
-Claude's proposal (Round ${round}):
-${claudeResponse}
+    const truncate = (s: string) =>
+      s.length > maxRespLen ? s.slice(0, maxRespLen) + '\n... (truncated)' : s;
+
+    let historySection = '';
+    if (session.rounds.length > 0) {
+      const historyParts = session.rounds.map((r) => {
+        return `### Round ${r.round} (${r.agreement})
+**Claude's proposal:**
+${truncate(r.claudeResponse)}
+
+**Your previous review:**
+${truncate(r.codexResponse)}`;
+      });
+      historySection = `\n## Previous Rounds\n${historyParts.join('\n\n')}\n`;
+    }
+
+    return `User request: "${session.prompt}"
+${historySection}
+## Claude's Latest Proposal (Round ${round}):
+${truncate(claudeResponse)}
 
 Please review this proposal. Consider:
 1. Architecture decisions

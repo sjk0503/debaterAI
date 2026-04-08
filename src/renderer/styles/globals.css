@@ -45,6 +45,13 @@ input, textarea, button, select, .no-drag {
   cursor: text;
 }
 
+/* Allow text selection in content areas */
+.selectable-text,
+.selectable-text * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -90,3 +97,11 @@ input, textarea, button, select, .no-drag {
 .dot-coding   { background: #3b82f6; }
 .dot-done     { background: var(--codex); }
 .dot-error    { background: #ef4444; }
+
+/* Activity spinner */
+@keyframes spin { 100% { transform: rotate(360deg); } }
+.activity-spinner { animation: spin 1s linear infinite; display: inline-block; }
+
+/* Pulse animation for running session */
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.pulse { animation: pulse 2s ease-in-out infinite; }

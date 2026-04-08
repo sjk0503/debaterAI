@@ -9,7 +9,8 @@ import { SettingsModal } from './components/SettingsModal';
 import { PermissionModal } from './components/PermissionModal';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { DiffView } from './components/DiffView';
-import { DebateMessage, DebateMode, AppReadiness } from '../shared/types';
+import { DebateMessage, DebateMode, DebateStatus, AppReadiness } from '../shared/types';
+import { reconstructMessages } from './utils/session-reconstructor';
 
 declare global {
   interface Window {
@@ -20,8 +21,11 @@ declare global {
       onAgentEvent: (cb: (event: any) => void) => () => void;
       getReadiness: (projectPath: string) => Promise<AppReadiness>;
       validateStart: () => Promise<{ valid: boolean; error?: string }>;
-      startDebate: (prompt: string, projectPath: string, mode?: string) => Promise<string>;
+      startDebate: (prompt: string, projectPath: string, mode?: string, sessionId?: string) => Promise<string>;
       intervene: (decision: string) => Promise<any>;
+      sessionLoad: (sessionId: string) => Promise<any[]>;
+      sessionGetMeta: (sessionId: string) => Promise<any>;
+      sessionDelete: (sessionId: string) => Promise<void>;
       applyCode: (debateId: string) => Promise<any>;
       onDebateMessage: (cb: (msg: DebateMessage) => void) => () => void;
       onDebateStatus: (cb: (status: any) => void) => () => void;
@@ -49,7 +53,7 @@ type RightPanel = 'editor' | 'diff' | null;
 
 export default function App() {
   const [messages, setMessages] = useState<DebateMessage[]>([]);
-  const [status, setStatus] = useState<string>('idle');
+  const [status, setStatus] = useState<DebateStatus>('idle');
   const [showSettings, setShowSettings] = useState(false);
   const [projectPath, setProjectPath] = useState<string>('');
   const [showSidebar, setShowSidebar] = useState(true);
@@ -67,9 +71,17 @@ export default function App() {
     return !localStorage.getItem('debaterai-onboarded');
   });
 
+  const isActive = status !== 'idle' && status !== 'done' && status !== 'error';
+
+  const [latestAgentEvent, setLatestAgentEvent] = useState<any>(null);
+
   const { openFile, openInEditor, clearFile } = useEditorTabs();
 
   useEffect(() => {
+    const cleanupAgent = window.api?.onAgentEvent?.((event: any) => {
+      setLatestAgentEvent(event);
+    });
+
     const cleanupMsg = window.api?.onDebateMessage((msg) => {
       setMessages((prev) => {
         const existing = prev.findIndex((m) => m.id === msg.id);
@@ -106,6 +118,7 @@ export default function App() {
     window.addEventListener('keydown', handleKey);
 
     return () => {
+      cleanupAgent?.();
       cleanupMsg?.();
       cleanupStatus?.();
       cleanupPerm?.();
@@ -120,6 +133,27 @@ export default function App() {
     setStatus('idle');
     setCurrentSessionId(null);
     setSessionRefresh((v) => v + 1);
+  };
+
+  const handleSelectSession = async (sessionId: string) => {
+    if (sessionId === currentSessionId) return;
+    if (isActive) {
+      await window.api.killAllAgents?.().catch(() => {});
+    }
+    setCurrentSessionId(sessionId);
+    try {
+      const events = await window.api.sessionLoad(sessionId);
+      const result = reconstructMessages(events || []);
+      setMessages(result.messages);
+      setStatus(result.finalStatus);
+      const meta = await window.api.sessionGetMeta(sessionId);
+      if (meta?.mode) setSelectedMode(meta.mode as DebateMode);
+      if (meta?.projectPath) setProjectPath(meta.projectPath);
+    } catch (err) {
+      console.error('Failed to load session:', err);
+      setMessages([]);
+      setStatus('idle');
+    }
   };
 
   const handleFileSelect = (filePath: string) => {
@@ -193,7 +227,8 @@ export default function App() {
         {sidebarTab === 'sessions' ? (
           <SessionList
             currentSessionId={currentSessionId}
-            onSelectSession={(id) => setCurrentSessionId(id)}
+            runningSessionId={isActive ? currentSessionId : null}
+            onSelectSession={handleSelectSession}
             onDeleteSession={(id) => {
               (window.api as any).sessionDelete?.(id);
               setSessionRefresh((v) => v + 1);
@@ -212,6 +247,33 @@ export default function App() {
     </>
   );
 
+  const handleClearMessages = () => {
+    setMessages([]);
+    setStatus('idle');
+  };
+
+  const handleAddSystemMessage = (content: string) => {
+    const msg: DebateMessage = {
+      id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      role: 'system',
+      content,
+      timestamp: Date.now(),
+    };
+    setMessages((prev) => [...prev, msg]);
+  };
+
+  const handleApplyCode = async () => {
+    if (currentSessionId) {
+      try {
+        await window.api.applyCode(currentSessionId);
+      } catch (err: any) {
+        handleAddSystemMessage(`Failed to apply code: ${err?.message || String(err)}`);
+      }
+    } else {
+      handleAddSystemMessage('No active session to apply code from.');
+    }
+  };
+
   // ── Main content (debate panel) ───────────────────────────────────
   const mainContent = (
     <DebatePanel
@@ -220,10 +282,16 @@ export default function App() {
       projectPath={projectPath}
       selectedMode={selectedMode}
       settingsVersion={settingsVersion}
+      currentSessionId={currentSessionId}
+      latestAgentEvent={latestAgentEvent}
       onProjectPathChange={setProjectPath}
       onOpenDirectory={handleOpenDirectory}
       onOpenSettings={() => setShowSettings(true)}
       onModeChange={setSelectedMode}
+      onClearMessages={handleClearMessages}
+      onShowDiff={handleShowDiff}
+      onApplyCode={handleApplyCode}
+      onAddSystemMessage={handleAddSystemMessage}
     />
   );
 
@@ -258,7 +326,7 @@ export default function App() {
           <span className="text-sm font-semibold tracking-tight" style={{ color: 'var(--text-1)' }}>
             debaterAI
           </span>
-          <StatusDot status={status} />
+          <StatusDot status={status} selectedMode={selectedMode} />
         </div>
 
         <div className="flex items-center gap-1">
@@ -336,15 +404,21 @@ function TitleButton({ onClick, children }: { onClick: () => void; children: Rea
   );
 }
 
-function StatusDot({ status }: { status: string }) {
+function StatusDot({ status, selectedMode }: { status: string; selectedMode?: DebateMode }) {
+  const debatingLabel = selectedMode === 'claude-only'
+    ? 'Claude working'
+    : selectedMode === 'codex-only'
+      ? 'Codex working'
+      : 'Debating';
+
   const labels: Record<string, { label: string; dotClass: string }> = {
-    idle:      { label: 'Ready',    dotClass: 'dot-idle' },
-    thinking:  { label: 'Thinking', dotClass: 'dot-thinking' },
-    debating:  { label: 'Debating', dotClass: 'dot-debating' },
-    consensus: { label: 'Consensus',dotClass: 'dot-consensus' },
-    coding:    { label: 'Coding',   dotClass: 'dot-coding' },
-    done:      { label: 'Done',     dotClass: 'dot-done' },
-    error:     { label: 'Error',    dotClass: 'dot-error' },
+    idle:      { label: 'Ready',       dotClass: 'dot-idle' },
+    thinking:  { label: 'Thinking',    dotClass: 'dot-thinking' },
+    debating:  { label: debatingLabel, dotClass: 'dot-debating' },
+    consensus: { label: 'Consensus',   dotClass: 'dot-consensus' },
+    coding:    { label: 'Coding',      dotClass: 'dot-coding' },
+    done:      { label: 'Done',        dotClass: 'dot-done' },
+    error:     { label: 'Error',       dotClass: 'dot-error' },
   };
   const cfg = labels[status] || labels.idle;
   return (

@@ -15,12 +15,13 @@ interface SessionMeta {
 
 interface Props {
   currentSessionId: string | null;
+  runningSessionId?: string | null;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   refreshTrigger: number;
 }
 
-export function SessionList({ currentSessionId, onSelectSession, onDeleteSession, refreshTrigger }: Props) {
+export function SessionList({ currentSessionId, runningSessionId, onSelectSession, onDeleteSession, refreshTrigger }: Props) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -59,6 +60,7 @@ export function SessionList({ currentSessionId, onSelectSession, onDeleteSession
           key={session.id}
           session={session}
           isActive={session.id === currentSessionId}
+          isRunning={session.id === runningSessionId}
           onSelect={() => onSelectSession(session.id)}
           onDelete={() => onDeleteSession(session.id)}
         />
@@ -67,9 +69,10 @@ export function SessionList({ currentSessionId, onSelectSession, onDeleteSession
   );
 }
 
-function SessionCard({ session, isActive, onSelect, onDelete }: {
+function SessionCard({ session, isActive, isRunning, onSelect, onDelete }: {
   session: SessionMeta;
   isActive: boolean;
+  isRunning?: boolean;
   onSelect: () => void;
   onDelete: () => void;
 }) {
@@ -98,7 +101,7 @@ function SessionCard({ session, isActive, onSelect, onDelete }: {
       {/* Metadata row */}
       <div className="flex items-center gap-2 mt-1">
         <span
-          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isRunning ? 'pulse' : ''}`}
           style={{ background: statusColor }}
         />
         <span className="text-xs" style={{ color: 'var(--text-3)' }}>

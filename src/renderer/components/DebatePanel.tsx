@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { DebateMessage, DebateMode, AppReadiness, ModeStatus } from '../../shared/types';
 import { MarkdownMessage } from './MarkdownMessage';
 import { AgentActivityPanel } from './AgentActivityPanel';
+import { SlashCommandPalette } from './SlashCommandPalette';
+import { ActivityBar } from './ActivityBar';
+import { useSlashCommands } from '../hooks/useSlashCommands';
 
 interface Props {
   messages: DebateMessage[];
@@ -9,39 +12,103 @@ interface Props {
   projectPath: string;
   selectedMode: DebateMode;
   settingsVersion: number;
+  currentSessionId?: string | null;
+  latestAgentEvent?: any;
   onProjectPathChange: (path: string) => void;
   onOpenDirectory: () => void;
   onOpenSettings: (tab?: string) => void;
   onModeChange: (mode: DebateMode) => void;
+  onClearMessages?: () => void;
+  onShowDiff?: () => void;
+  onApplyCode?: () => void;
+  onAddSystemMessage?: (content: string) => void;
 }
 
-export function DebatePanel({ messages, status, projectPath, selectedMode, settingsVersion, onProjectPathChange, onOpenDirectory, onOpenSettings, onModeChange }: Props) {
+export function DebatePanel({
+  messages, status, projectPath, selectedMode, settingsVersion,
+  currentSessionId, latestAgentEvent,
+  onProjectPathChange, onOpenDirectory, onOpenSettings, onModeChange,
+  onClearMessages, onShowDiff, onApplyCode, onAddSystemMessage,
+}: Props) {
   const [input, setInput] = useState('');
   const [readiness, setReadiness] = useState<AppReadiness | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isActive = status !== 'idle' && status !== 'done' && status !== 'error';
 
+  // Mode-aware labels
+  const activeLabel = selectedMode === 'debate'
+    ? 'Debating...'
+    : selectedMode === 'claude-only'
+      ? 'Claude working...'
+      : 'Codex working...';
+
+  // Slash commands
+  const slashCmds = useSlashCommands({
+    projectPath,
+    selectedMode,
+    currentSessionId: currentSessionId ?? null,
+    onModeChange,
+    onClearMessages: onClearMessages || (() => {}),
+    onShowDiff: onShowDiff || (() => {}),
+    onApplyCode: onApplyCode || (() => {}),
+    onAddSystemMessage: onAddSystemMessage || (() => {}),
+  });
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Fetch readiness on mount and when project changes
   useEffect(() => {
     window.api.getReadiness?.(projectPath).then(setReadiness).catch(() => {});
   }, [projectPath, status, settingsVersion]);
 
   const handleSubmit = async () => {
     if (!input.trim() || !projectPath.trim() || isActive) return;
-    await window.api.startDebate(input.trim(), projectPath.trim(), selectedMode);
+
+    // Try slash command first
+    if (slashCmds.tryExecuteSlashCommand(input)) {
+      setInput('');
+      return;
+    }
+
+    await window.api.startDebate(input.trim(), projectPath.trim(), selectedMode, currentSessionId || undefined);
     setInput('');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Slash command palette gets priority
+    if (slashCmds.handleKeyDown(e, input)) {
+      // Check if slash command set a pending input
+      const pending = slashCmds.getPendingInput();
+      if (pending !== null) setInput(pending);
+      return;
+    }
+
+    // Enter to send (no modifier), Shift+Enter for newline
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+      return;
+    }
+
+    // Cmd/Ctrl+Enter for backward compat
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       handleSubmit();
     }
+  };
+
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    const cursorPos = inputRef.current?.selectionStart ?? value.length;
+    slashCmds.handleInputChange(value, cursorPos);
+  };
+
+  const handlePaletteSelect = (cmd: any) => {
+    const newInput = slashCmds.handleSelect(cmd);
+    setInput(newInput);
+    inputRef.current?.focus();
   };
 
   const roleMeta: Record<string, { label: string; color: string }> = {
@@ -159,6 +226,13 @@ export function DebatePanel({ messages, status, projectPath, selectedMode, setti
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Activity Bar */}
+      <ActivityBar
+        isActive={isActive}
+        latestEvent={latestAgentEvent}
+        selectedMode={selectedMode}
+      />
+
       {/* Input */}
       <div
         className="flex-shrink-0 px-4 py-3"
@@ -191,13 +265,24 @@ export function DebatePanel({ messages, status, projectPath, selectedMode, setti
           </button>
         </div>
 
-        <div className="flex gap-2 items-end">
+        <div className="flex gap-2 items-end relative">
+          {/* Slash Command Palette */}
+          {slashCmds.showPalette && (
+            <SlashCommandPalette
+              commands={slashCmds.filteredCommands}
+              selectedIndex={slashCmds.selectedIndex}
+              visible={slashCmds.showPalette}
+              onSelect={handlePaletteSelect}
+              onClose={slashCmds.closePalette}
+            />
+          )}
+
           <textarea
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isActive ? 'Debating...' : 'Describe what to build... (Cmd+Enter to start)'}
+            placeholder={isActive ? activeLabel : 'Describe what to build... (Enter to send, Shift+Enter for new line)'}
             rows={2}
             disabled={isActive}
             className="flex-1 text-xs rounded px-3 py-2 resize-none outline-none transition"
@@ -225,7 +310,7 @@ export function DebatePanel({ messages, status, projectPath, selectedMode, setti
               minWidth: 96,
             }}
           >
-            {isActive ? 'Debating...' : 'Send'}
+            {isActive ? activeLabel : 'Send'}
           </button>
         </div>
       </div>
@@ -275,15 +360,12 @@ function ReadinessDashboard({
 
       {/* Status Cards */}
       <div className="w-full max-w-sm space-y-2">
-        {/* Project Card */}
         <ProviderCard
           label="Project"
           ready={project.ready}
           detail={project.ready ? project.path.split('/').pop() || project.path : 'No project selected'}
           action={!project.ready ? { label: 'Browse', onClick: onOpenDirectory } : undefined}
         />
-
-        {/* Claude Card */}
         <ProviderCard
           label="Claude"
           color="var(--claude)"
@@ -297,8 +379,6 @@ function ReadinessDashboard({
             onClick: () => onOpenSettings('claude'),
           } : undefined}
         />
-
-        {/* Codex Card */}
         <ProviderCard
           label="Codex"
           color="var(--codex)"
@@ -324,7 +404,6 @@ function ReadinessDashboard({
         ))}
       </div>
 
-      {/* Secondary CTA */}
       <button
         onClick={() => onOpenSettings()}
         className="text-xs px-3 py-1.5 rounded transition"

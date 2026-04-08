@@ -48,8 +48,8 @@ contextBridge.exposeInMainWorld('api', {
   // ── Debate ──────────────────────────────────────────────────────────────
   validateStart: () =>
     ipcRenderer.invoke('debate:validateStart'),
-  startDebate: (prompt: string, projectPath: string, mode?: string) =>
-    ipcRenderer.invoke('debate:start', { prompt, projectPath, mode }),
+  startDebate: (prompt: string, projectPath: string, mode?: string, sessionId?: string) =>
+    ipcRenderer.invoke('debate:start', { prompt, projectPath, mode, sessionId }),
   intervene: (decision: string) =>
     ipcRenderer.invoke('debate:intervene', { decision }),
   applyCode: (debateId: string) =>
