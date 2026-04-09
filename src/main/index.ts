@@ -58,7 +58,7 @@ function setupIPC() {
   const permissionService = new PermissionService();
   const sessionStore = new SessionStore();
   agentRuntime = new AgentRuntime();
-  debateEngine = new DebateEngine(aiService, sessionStore, agentRuntime);
+  debateEngine = new DebateEngine(aiService, sessionStore, agentRuntime, gitService);
   orchestrator = new Orchestrator(agentRuntime, gitService, sessionStore);
   const checkpointService = new CheckpointService();
 
@@ -68,12 +68,13 @@ function setupIPC() {
   ipcMain.handle('agent:spawn', async (_event, opts) => {
     if (!agentRuntime || !mainWindow) return { error: 'Not initialized' };
 
-    const result = await agentRuntime.spawn({
+    const { agentId, done } = agentRuntime.spawn({
       ...opts,
       onEvent: (event) => {
         mainWindow?.webContents.send('agent:event', event);
       },
     });
+    const result = await done;
     return result;
   });
 
@@ -124,8 +125,8 @@ function setupIPC() {
   // ============================================================================
   // Checkpoints
   // ============================================================================
-  ipcMain.handle('checkpoint:create', async (_event, { projectPath, description }) => {
-    return checkpointService.create(projectPath, description);
+  ipcMain.handle('checkpoint:create', async (_event, { projectPath, description, targetFiles }) => {
+    return checkpointService.create(projectPath, description, targetFiles);
   });
 
   ipcMain.handle('checkpoint:rollback', async (_event, { checkpointId }) => {
@@ -149,6 +150,32 @@ function setupIPC() {
     console.log('[IPC session:load] loading session:', sessionId);
     const events = sessionStore.readEvents(sessionId);
     console.log('[IPC session:load] found', events.length, 'events');
+
+    // Restore worktree session in debateEngine if a worktree_created event exists
+    const wtEvent = events.find((e: any) => e.type === 'worktree_created' || (e.data as any)?.kind === 'worktree_created');
+    if (wtEvent && debateEngine) {
+      const wtData = wtEvent.data as any;
+      const worktreePath = wtData.worktreePath;
+      const branchName = wtData.branchName;
+      const baseBranch = wtData.baseBranch;
+
+      if (worktreePath && branchName) {
+        // Check if the worktree directory still exists on disk
+        try {
+          const fs = await import('fs/promises');
+          await fs.access(worktreePath);
+          // Worktree exists — find projectPath from session_start event
+          const startEvent = events.find((e: any) => e.type === 'session_start' || (e.data as any)?.kind === 'session_start');
+          const projectPath = (startEvent?.data as any)?.projectPath || '';
+          debateEngine.restoreWorktreeSession(sessionId, projectPath, worktreePath, branchName, baseBranch || '');
+          console.log('[IPC session:load] restored worktree session for', sessionId);
+        } catch {
+          // Worktree directory no longer exists — skip restoration
+          console.log('[IPC session:load] worktree no longer on disk for', sessionId);
+        }
+      }
+    }
+
     return events;
   });
 
@@ -238,13 +265,33 @@ function setupIPC() {
   });
 
   // 토론 중 사용자 개입
-  ipcMain.handle('debate:intervene', async (_event, { decision }) => {
-    return debateEngine?.userIntervene(decision);
+  ipcMain.handle('debate:intervene', async (_event, { debateId, message }) => {
+    return debateEngine?.userIntervene(debateId, message);
+  });
+
+  // Tiebreak 해결 — maxRounds 도달 시 사용자가 승자 선택
+  ipcMain.handle('debate:resolveTiebreak', async (_event, { debateId, winner }) => {
+    return debateEngine?.resolveTiebreak(debateId, winner);
   });
 
   // 합의된 코드 적용
   ipcMain.handle('debate:apply', async (_event, { debateId }) => {
     return debateEngine?.applyConsensus(debateId);
+  });
+
+  // 합의 확인 — 워크트리 사용 여부 결정
+  ipcMain.handle('debate:confirmConsensus', async (_event, { debateId, useWorktree }) => {
+    return debateEngine?.confirmConsensus(debateId, useWorktree);
+  });
+
+  // 워크트리 병합
+  ipcMain.handle('debate:mergeWorktree', async (_event, { debateId }) => {
+    return debateEngine?.mergeWorktree(debateId);
+  });
+
+  // 워크트리 폐기
+  ipcMain.handle('debate:discardWorktree', async (_event, { debateId }) => {
+    return debateEngine?.discardWorktree(debateId);
   });
 
   // AI 설정
@@ -450,14 +497,50 @@ function setupIPC() {
       });
     });
   });
+
+  // ============================================================================
+  // Orphan worktree cleanup at startup
+  // ============================================================================
+  (async () => {
+    try {
+      const allSessions = sessionStore.list();
+      const activeWorktreePaths: string[] = [];
+      for (const meta of allSessions) {
+        const events = sessionStore.readEvents(meta.id);
+        const wtEvent = events.find((e: any) => e.type === 'worktree_created');
+        if (wtEvent) {
+          const wtData = wtEvent.data as any;
+          if (wtData?.worktreePath) {
+            activeWorktreePaths.push(wtData.worktreePath);
+          }
+        }
+      }
+      const removed = await gitService.cleanupOrphanWorktrees(activeWorktreePaths);
+      if (removed > 0) {
+        console.log(`[startup] Cleaned up ${removed} orphan worktree(s)`);
+      }
+    } catch (err) {
+      console.warn('[startup] Worktree cleanup failed:', err);
+    }
+  })();
 }
 
-async function getFileTree(dir: string, prefix = ''): Promise<any[]> {
+async function getFileTree(
+  dir: string,
+  prefix = '',
+  maxDepth = 10,
+  maxFiles = 500,
+  state = { count: 0 },
+): Promise<any[]> {
+  if (maxDepth <= 0 || state.count >= maxFiles) return [];
+
   const fs = await import('fs/promises');
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const items: any[] = [];
 
   for (const entry of entries) {
+    if (state.count >= maxFiles) break;
+
     // 무시할 폴더
     if (['.git', 'node_modules', 'dist', '.next', '__pycache__'].includes(entry.name)) continue;
     if (entry.name.startsWith('.') && entry.name !== '.env.example') continue;
@@ -468,9 +551,10 @@ async function getFileTree(dir: string, prefix = ''): Promise<any[]> {
         name: entry.name,
         path: fullPath,
         type: 'directory',
-        children: await getFileTree(fullPath, prefix + '  '),
+        children: await getFileTree(fullPath, prefix + '  ', maxDepth - 1, maxFiles, state),
       });
     } else {
+      state.count++;
       items.push({
         name: entry.name,
         path: fullPath,
@@ -512,13 +596,20 @@ async function getProjectContext(projectPath: string, maxFiles: number): Promise
   const sourceFiles = collectSourceFiles(tree);
   const filesToRead = sourceFiles.slice(0, maxFiles);
 
+  const maxTotalBytes = 50000;
+  let totalBytes = context.length;
+
   for (const filePath of filesToRead) {
+    if (totalBytes >= maxTotalBytes) break;
     try {
       const content = await fs.readFile(filePath, 'utf-8');
       if (content.length > 5000) continue; // 너무 큰 파일 스킵
       const ext = path.extname(filePath).slice(1) || 'text';
       const relPath = path.relative(projectPath, filePath);
-      context += `### ${relPath}\n\`\`\`${ext}\n${content}\n\`\`\`\n\n`;
+      const block = `### ${relPath}\n\`\`\`${ext}\n${content}\n\`\`\`\n\n`;
+      totalBytes += block.length;
+      if (totalBytes > maxTotalBytes) break;
+      context += block;
     } catch {}
   }
 
@@ -553,6 +644,10 @@ function collectSourceFiles(items: any[]): string[] {
 app.whenReady().then(() => {
   createWindow();
   setupIPC();
+});
+
+app.on('before-quit', () => {
+  agentRuntime?.killAll();
 });
 
 app.on('window-all-closed', () => {

@@ -5,6 +5,9 @@ interface ReconstructResult {
   messages: DebateMessage[];
   finalStatus: DebateStatus;
   mode?: DebateMode;
+  worktreePath?: string;
+  worktreeBranch?: string;
+  worktreeBaseBranch?: string;
 }
 
 export function reconstructMessages(events: SessionEvent[]): ReconstructResult {
@@ -16,6 +19,9 @@ export function reconstructMessages(events: SessionEvent[]): ReconstructResult {
   let currentAgentText = '';
   let currentAgentRole: 'claude' | 'codex' | null = null;
   let currentRound = 0;
+  let worktreePath: string | undefined;
+  let worktreeBranch: string | undefined;
+  let worktreeBaseBranch: string | undefined;
 
   const flushAgent = () => {
     if (currentAgentRole && (currentAgentText || currentAgentEvents.length > 0)) {
@@ -129,6 +135,14 @@ export function reconstructMessages(events: SessionEvent[]): ReconstructResult {
         break;
       }
 
+      case 'worktree_created': {
+        const wt = event.data as any;
+        worktreePath = wt.worktreePath;
+        worktreeBranch = wt.branchName;
+        worktreeBaseBranch = wt.baseBranch;
+        break;
+      }
+
       default:
         break;
     }
@@ -136,5 +150,5 @@ export function reconstructMessages(events: SessionEvent[]): ReconstructResult {
 
   flushAgent(); // flush any remaining agent data
 
-  return { messages, finalStatus, mode };
+  return { messages, finalStatus, mode, worktreePath, worktreeBranch, worktreeBaseBranch };
 }

@@ -244,7 +244,7 @@ export function useSlashCommands(options: SlashCommandOptions): UseSlashCommands
             opts.onAddSystemMessage('No checkpoints found.');
             break;
           }
-          const sorted = [...checkpoints].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+          const sorted = [...checkpoints].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
           const latest = sorted[0];
           await (window.api as any).rollbackCheckpoint(latest.id);
           opts.onAddSystemMessage(`Rolled back to checkpoint: ${latest.id}`);

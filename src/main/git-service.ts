@@ -2,6 +2,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
+import crypto from 'crypto';
 
 const exec = promisify(execFile);
 
@@ -76,9 +78,10 @@ export class GitService {
     projectPath: string,
     debateId: string,
     baseBranch?: string,
-  ): Promise<{ worktreePath: string; branchName: string }> {
+  ): Promise<{ worktreePath: string; branchName: string; baseBranch: string }> {
     const branchName = `debate/${debateId.slice(0, 8)}`;
-    const worktreeBase = path.join(projectPath, '..', '.debaterai-worktrees');
+    const projectHash = crypto.createHash('md5').update(projectPath).digest('hex').slice(0, 8);
+    const worktreeBase = path.join(os.homedir(), '.debaterai', 'worktrees', projectHash);
     const worktreePath = path.join(worktreeBase, debateId.slice(0, 8));
 
     await fs.mkdir(worktreeBase, { recursive: true });
@@ -87,7 +90,7 @@ export class GitService {
     const base = baseBranch || (await this.currentBranch(projectPath));
     await this.git(projectPath, ['worktree', 'add', '-b', branchName, worktreePath, base]);
 
-    return { worktreePath, branchName };
+    return { worktreePath, branchName, baseBranch: base };
   }
 
   /**
@@ -197,6 +200,7 @@ export class GitService {
     worktreePath: string,
     branchName: string,
     commitMessage: string,
+    targetBranch?: string,
   ): Promise<{ merged: boolean; error?: string }> {
     try {
       // 워크트리에서 커밋
@@ -205,8 +209,10 @@ export class GitService {
         await this.commit(worktreePath, commitMessage);
       }
 
-      // 메인 프로젝트에서 머지
-      const mainBranch = await this.currentBranch(projectPath);
+      // 머지 대상 브랜치로 전환 (워크트리 생성 시점의 브랜치 사용)
+      if (targetBranch) {
+        await this.checkout(projectPath, targetBranch);
+      }
       await this.merge(projectPath, branchName);
 
       // 워크트리 삭제
@@ -258,6 +264,52 @@ export class GitService {
     } catch {
       // Branch may not exist
     }
+  }
+
+  // ============================================================================
+  // Orphan Worktree Cleanup
+  // ============================================================================
+
+  /**
+   * Remove orphan worktrees that are not in the active list.
+   * Scans ~/.debaterai/worktrees/ for all project hash dirs and their worktree subdirs.
+   */
+  async cleanupOrphanWorktrees(activeWorktreePaths: string[]): Promise<number> {
+    const activeSet = new Set(activeWorktreePaths.map(p => path.resolve(p)));
+    const worktreesRoot = path.join(os.homedir(), '.debaterai', 'worktrees');
+    let removed = 0;
+
+    try {
+      const projectDirs = await fs.readdir(worktreesRoot);
+      for (const projectHash of projectDirs) {
+        const projectDir = path.join(worktreesRoot, projectHash);
+        const stat = await fs.stat(projectDir);
+        if (!stat.isDirectory()) continue;
+
+        const worktreeDirs = await fs.readdir(projectDir);
+        for (const wtDir of worktreeDirs) {
+          const wtPath = path.resolve(path.join(projectDir, wtDir));
+          if (!activeSet.has(wtPath)) {
+            try {
+              await fs.rm(wtPath, { recursive: true, force: true });
+              removed++;
+            } catch {}
+          }
+        }
+
+        // Remove empty project hash directory
+        try {
+          const remaining = await fs.readdir(projectDir);
+          if (remaining.length === 0) {
+            await fs.rmdir(projectDir);
+          }
+        } catch {}
+      }
+    } catch {
+      // worktrees root doesn't exist yet — nothing to clean
+    }
+
+    return removed;
   }
 
   // ============================================================================

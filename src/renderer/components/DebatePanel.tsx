@@ -9,6 +9,7 @@ import { useSlashCommands } from '../hooks/useSlashCommands';
 interface Props {
   messages: DebateMessage[];
   status: string;
+  statusData?: any;
   projectPath: string;
   selectedMode: DebateMode;
   settingsVersion: number;
@@ -27,13 +28,15 @@ interface Props {
 }
 
 export function DebatePanel({
-  messages, status, projectPath, selectedMode, settingsVersion,
+  messages, status, statusData, projectPath, selectedMode, settingsVersion,
   currentSessionId, latestAgentEvent,
   onProjectPathChange, onOpenDirectory, onOpenSettings, onModeChange,
   onClearMessages, onShowDiff, onApplyCode, onAddSystemMessage, onSessionStarted, onStopDebate,
 }: Props) {
   const [input, setInput] = useState('');
+  const [interveneInput, setInterveneInput] = useState('');
   const [readiness, setReadiness] = useState<AppReadiness | null>(null);
+  const [alwaysUseWorktree, setAlwaysUseWorktree] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isActive = status !== 'idle' && status !== 'done' && status !== 'error';
@@ -64,6 +67,12 @@ export function DebatePanel({
   useEffect(() => {
     window.api.getReadiness?.(projectPath).then(setReadiness).catch(() => {});
   }, [projectPath, status, settingsVersion]);
+
+  useEffect(() => {
+    window.api.getSettings?.().then((s: any) => {
+      setAlwaysUseWorktree(!!s?.debate?.alwaysUseWorktree);
+    }).catch(() => {});
+  }, [settingsVersion]);
 
   const handleSubmit = async () => {
     if (!input.trim() || !projectPath.trim() || isActive) return;
@@ -229,6 +238,51 @@ export function DebatePanel({
             </div>
           );
         })}
+        {/* Consensus Confirmation Card */}
+        {status === 'awaiting_confirmation' && statusData && (
+          <ConsensusConfirmCard
+            plan={statusData.plan || ''}
+            alwaysUseWorktree={alwaysUseWorktree}
+            onConfirm={(useWorktree: boolean) => {
+              window.api.confirmConsensus(statusData.debateId, useWorktree);
+            }}
+            onReject={() => {
+              onStopDebate?.();
+            }}
+          />
+        )}
+
+        {/* Worktree Review Card */}
+        {status === 'worktree_review' && statusData && (
+          <WorktreeReviewCard
+            branch={statusData.branch || ''}
+            diff={statusData.diff || ''}
+            onMerge={() => {
+              window.api.mergeWorktree(statusData.debateId);
+            }}
+            onDiscard={() => {
+              window.api.discardWorktree(statusData.debateId);
+            }}
+          />
+        )}
+
+        {/* Tiebreak Card — shown when maxRounds reached without consensus */}
+        {status === 'awaiting_tiebreak' && statusData && (
+          <TiebreakCard
+            claudeProposal={statusData.claudeProposal || ''}
+            codexProposal={statusData.codexProposal || ''}
+            onPickClaude={() => {
+              window.api.resolveTiebreak(statusData.debateId, 'claude');
+            }}
+            onPickCodex={() => {
+              window.api.resolveTiebreak(statusData.debateId, 'codex');
+            }}
+            onCancel={() => {
+              onStopDebate?.();
+            }}
+          />
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -238,6 +292,54 @@ export function DebatePanel({
         latestEvent={latestAgentEvent}
         selectedMode={selectedMode}
       />
+
+      {/* User Intervention Input — shown during debate to guide direction */}
+      {status === 'debating' && currentSessionId && (
+        <div
+          className="flex items-center gap-2 px-4 py-2 flex-shrink-0"
+          style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-1)' }}
+        >
+          <input
+            type="text"
+            value={interveneInput}
+            onChange={(e) => setInterveneInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && interveneInput.trim()) {
+                window.api.intervene(currentSessionId, interveneInput.trim());
+                setInterveneInput('');
+              }
+            }}
+            placeholder="토론 방향 지시..."
+            className="flex-1 text-xs rounded px-2 py-1.5 outline-none transition"
+            style={{
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-2)',
+              fontSize: 11,
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+          />
+          <button
+            onClick={() => {
+              if (interveneInput.trim() && currentSessionId) {
+                window.api.intervene(currentSessionId, interveneInput.trim());
+                setInterveneInput('');
+              }
+            }}
+            disabled={!interveneInput.trim()}
+            className="text-xs px-3 py-1.5 rounded transition"
+            style={{
+              background: interveneInput.trim() ? 'rgba(99,102,241,0.15)' : 'var(--bg-2)',
+              color: interveneInput.trim() ? 'var(--accent)' : 'var(--text-3)',
+              border: `1px solid ${interveneInput.trim() ? 'rgba(99,102,241,0.3)' : 'var(--border)'}`,
+              cursor: interveneInput.trim() ? 'pointer' : 'default',
+            }}
+          >
+            Send
+          </button>
+        </div>
+      )}
 
       {/* Apply Code Banner — shown when code generation is done */}
       {status === 'done' && (() => {
@@ -580,5 +682,295 @@ function StatusBadge({ ready, label }: { ready: boolean; label: string }) {
       />
       <span style={{ color: 'var(--text-3)' }}>{label}</span>
     </span>
+  );
+}
+
+// ============================================================================
+// Consensus Confirmation Card
+// ============================================================================
+
+function ConsensusConfirmCard({
+  plan,
+  alwaysUseWorktree,
+  onConfirm,
+  onReject,
+}: {
+  plan: string;
+  alwaysUseWorktree: boolean;
+  onConfirm: (useWorktree: boolean) => void;
+  onReject: () => void;
+}) {
+  return (
+    <div
+      className="rounded-lg p-4 space-y-3"
+      style={{
+        background: 'var(--bg-2)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold" style={{ color: 'var(--codex)' }}>
+          합의 완료
+        </span>
+      </div>
+
+      {plan && (
+        <div
+          className="text-xs overflow-y-auto rounded px-3 py-2 selectable-text"
+          style={{
+            background: 'var(--bg-1)',
+            border: '1px solid var(--border-subtle)',
+            color: 'var(--text-2)',
+            maxHeight: 200,
+            whiteSpace: 'pre-wrap',
+            lineHeight: 1.6,
+          }}
+        >
+          {plan}
+        </div>
+      )}
+
+      <p className="text-xs" style={{ color: 'var(--text-2)' }}>
+        수정할까요?
+      </p>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {alwaysUseWorktree ? (
+          <>
+            <button
+              onClick={() => onConfirm(true)}
+              className="text-xs px-4 py-1.5 rounded font-medium transition"
+              style={{ background: 'var(--accent)', color: 'white', border: 'none' }}
+            >
+              허용
+            </button>
+            <button
+              onClick={onReject}
+              className="text-xs px-4 py-1.5 rounded transition"
+              style={{
+                background: 'var(--bg-3)',
+                color: 'var(--text-2)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              거부
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => onConfirm(true)}
+              className="text-xs px-4 py-1.5 rounded font-medium transition"
+              style={{ background: 'var(--accent)', color: 'white', border: 'none' }}
+            >
+              새 워크트리에서 작업
+            </button>
+            <button
+              onClick={() => onConfirm(false)}
+              className="text-xs px-4 py-1.5 rounded font-medium transition"
+              style={{
+                background: 'var(--bg-3)',
+                color: 'var(--text-1)',
+                border: '1px solid var(--accent)',
+              }}
+            >
+              현재 프로젝트에서 작업
+            </button>
+            <button
+              onClick={onReject}
+              className="text-xs px-4 py-1.5 rounded transition"
+              style={{
+                background: 'var(--bg-3)',
+                color: 'var(--text-2)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              거부
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Worktree Review Card
+// ============================================================================
+
+// ============================================================================
+// Tiebreak Card — shown when maxRounds reached without consensus
+// ============================================================================
+
+function TiebreakCard({
+  claudeProposal,
+  codexProposal,
+  onPickClaude,
+  onPickCodex,
+  onCancel,
+}: {
+  claudeProposal: string;
+  codexProposal: string;
+  onPickClaude: () => void;
+  onPickCodex: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="rounded-lg p-4 space-y-3"
+      style={{
+        background: 'var(--bg-2)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>
+          합의 실패 — 어느 쪽 의견을 채택하시겠습니까?
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* Claude Proposal */}
+        <div className="space-y-1.5">
+          <span className="text-xs font-semibold" style={{ color: 'var(--claude)' }}>
+            Claude
+          </span>
+          <div
+            className="text-xs overflow-y-auto rounded px-3 py-2 selectable-text"
+            style={{
+              background: 'var(--bg-1)',
+              border: '1px solid rgba(139,92,246,0.2)',
+              color: 'var(--text-2)',
+              maxHeight: 200,
+              whiteSpace: 'pre-wrap',
+              lineHeight: 1.6,
+            }}
+          >
+            {claudeProposal || '(no proposal)'}
+          </div>
+        </div>
+
+        {/* Codex Proposal */}
+        <div className="space-y-1.5">
+          <span className="text-xs font-semibold" style={{ color: 'var(--codex)' }}>
+            Codex
+          </span>
+          <div
+            className="text-xs overflow-y-auto rounded px-3 py-2 selectable-text"
+            style={{
+              background: 'var(--bg-1)',
+              border: '1px solid rgba(16,185,129,0.2)',
+              color: 'var(--text-2)',
+              maxHeight: 200,
+              whiteSpace: 'pre-wrap',
+              lineHeight: 1.6,
+            }}
+          >
+            {codexProposal || '(no proposal)'}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={onPickClaude}
+          className="text-xs px-4 py-1.5 rounded font-medium transition"
+          style={{ background: 'var(--claude)', color: 'white', border: 'none' }}
+        >
+          Claude 의견 채택
+        </button>
+        <button
+          onClick={onPickCodex}
+          className="text-xs px-4 py-1.5 rounded font-medium transition"
+          style={{ background: 'var(--codex)', color: 'white', border: 'none' }}
+        >
+          Codex 의견 채택
+        </button>
+        <button
+          onClick={onCancel}
+          className="text-xs px-4 py-1.5 rounded transition"
+          style={{
+            background: 'var(--bg-3)',
+            color: 'var(--text-2)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          토론 중단
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WorktreeReviewCard({
+  branch,
+  diff,
+  onMerge,
+  onDiscard,
+}: {
+  branch: string;
+  diff: string;
+  onMerge: () => void;
+  onDiscard: () => void;
+}) {
+  return (
+    <div
+      className="rounded-lg p-4 space-y-3"
+      style={{
+        background: 'var(--bg-2)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>
+          워크트리 작업 완료
+        </span>
+      </div>
+
+      {branch && (
+        <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+          브랜치: <span style={{ color: 'var(--text-2)' }}>{branch}</span>
+        </p>
+      )}
+
+      {diff && (
+        <div
+          className="text-xs overflow-y-auto rounded px-3 py-2 selectable-text"
+          style={{
+            background: 'var(--bg-1)',
+            border: '1px solid var(--border-subtle)',
+            color: 'var(--text-2)',
+            maxHeight: 300,
+            whiteSpace: 'pre-wrap',
+            fontFamily: "'SF Mono', 'Fira Code', 'JetBrains Mono', monospace",
+            fontSize: 11,
+            lineHeight: 1.5,
+          }}
+        >
+          {diff}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onMerge}
+          className="text-xs px-4 py-1.5 rounded font-medium transition"
+          style={{ background: '#10b981', color: 'white', border: 'none' }}
+        >
+          메인에 병합
+        </button>
+        <button
+          onClick={onDiscard}
+          className="text-xs px-4 py-1.5 rounded transition"
+          style={{
+            background: 'var(--bg-3)',
+            color: '#ef4444',
+            border: '1px solid rgba(239,68,68,0.3)',
+          }}
+        >
+          폐기
+        </button>
+      </div>
+    </div>
   );
 }

@@ -75,8 +75,8 @@ export class AgentRuntime {
     }
   }
 
-  /** Spawn a CLI agent. Returns a promise that resolves when the agent finishes. */
-  async spawn(opts: AgentSpawnOptions): Promise<AgentRunResult> {
+  /** Spawn a CLI agent. Returns agentId immediately and a `done` promise for the result. */
+  spawn(opts: AgentSpawnOptions): { agentId: string; done: Promise<AgentRunResult> } {
     const agentId = uuidv4();
     const startTime = Date.now();
 
@@ -88,11 +88,11 @@ export class AgentRuntime {
       cwd: opts.cwd,
     }));
 
-    if (opts.provider === 'claude') {
-      return this.spawnClaude(agentId, opts, startTime);
-    } else {
-      return this.spawnCodex(agentId, opts, startTime);
-    }
+    const done = opts.provider === 'claude'
+      ? this.spawnClaude(agentId, opts, startTime)
+      : this.spawnCodex(agentId, opts, startTime);
+
+    return { agentId, done };
   }
 
   private spawnClaude(agentId: string, opts: AgentSpawnOptions, startTime: number): Promise<AgentRunResult> {
@@ -209,6 +209,7 @@ export class AgentRuntime {
       }
 
       const proc = spawn(bin, args, {
+        cwd: opts.cwd,
         env: { ...process.env, FORCE_COLOR: '0' },
         timeout: 600000,
         stdio: useStdin ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],

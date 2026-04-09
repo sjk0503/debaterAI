@@ -96,6 +96,8 @@ input, textarea, button, select, .no-drag {
 .dot-consensus{ background: var(--codex); }
 .dot-coding   { background: #3b82f6; }
 .dot-done     { background: var(--codex); }
+.dot-awaiting { background: #f59e0b; }
+.dot-review   { background: var(--accent); }
 .dot-error    { background: #ef4444; }
 
 /* Activity spinner */

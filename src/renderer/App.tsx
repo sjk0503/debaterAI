@@ -9,6 +9,8 @@ import { SettingsModal } from './components/SettingsModal';
 import { PermissionModal } from './components/PermissionModal';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { DiffView } from './components/DiffView';
+import { CompareView } from './components/CompareView';
+import { AgentDashboard } from './components/AgentDashboard';
 import { DebateMessage, DebateMode, DebateStatus, AppReadiness } from '../shared/types';
 import { reconstructMessages } from './utils/session-reconstructor';
 
@@ -22,7 +24,8 @@ declare global {
       getReadiness: (projectPath: string) => Promise<AppReadiness>;
       validateStart: () => Promise<{ valid: boolean; error?: string }>;
       startDebate: (prompt: string, projectPath: string, mode?: string, sessionId?: string) => Promise<string>;
-      intervene: (decision: string) => Promise<any>;
+      intervene: (debateId: string, message: string) => Promise<any>;
+      resolveTiebreak: (debateId: string, winner: 'claude' | 'codex') => Promise<any>;
       sessionLoad: (sessionId: string) => Promise<any[]>;
       sessionGetMeta: (sessionId: string) => Promise<any>;
       sessionDelete: (sessionId: string) => Promise<void>;
@@ -42,9 +45,17 @@ declare global {
       gitDiff: (projectPath: string) => Promise<string>;
       gitLog: (projectPath: string, count?: number) => Promise<string>;
       gitCurrentBranch: (projectPath: string) => Promise<string>;
+      confirmConsensus: (debateId: string, useWorktree: boolean) => Promise<any>;
+      mergeWorktree: (debateId: string) => Promise<any>;
+      discardWorktree: (debateId: string) => Promise<any>;
       onPermissionRequest: (cb: (req: any) => void) => () => void;
       respondPermission: (decision: string) => void;
       onTerminalData: (cb: (data: any) => void) => () => void;
+      startParallelDebate: (opts: any) => Promise<any>;
+      mergeTask: (taskId: string, commitMessage?: string) => Promise<any>;
+      discardTask: (taskId: string) => Promise<any>;
+      getTasks: (sessionId: string) => Promise<any>;
+      onOrchestratorEvent: (cb: (event: any) => void) => () => void;
     };
   }
 }
@@ -67,9 +78,16 @@ export default function App() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessionRefresh, setSessionRefresh] = useState(0);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [statusData, setStatusData] = useState<any>(null);
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem('debaterai-onboarded');
   });
+
+  // Orchestrator state
+  const [orchestratorTasks, setOrchestratorTasks] = useState<any[]>([]);
+  const [orchestratorCompareData, setOrchestratorCompareData] = useState<any>(null);
+  const [showOrchestratorUI, setShowOrchestratorUI] = useState(false);
+  const [showCompareView, setShowCompareView] = useState(false);
 
   const isActive = status !== 'idle' && status !== 'done' && status !== 'error';
 
@@ -96,6 +114,7 @@ export default function App() {
 
     const cleanupStatus = window.api?.onDebateStatus((s) => {
       setStatus(s.status);
+      setStatusData(s);
       if (s.status === 'done' || s.status === 'error') {
         setSessionRefresh((v) => v + 1);
       }
@@ -103,6 +122,54 @@ export default function App() {
 
     const cleanupPerm = window.api?.onPermissionRequest((req) => {
       setPermissionReq(req);
+    });
+
+    const cleanupOrch = window.api?.onOrchestratorEvent?.((event: any) => {
+      if (event.type === 'task_started' || event.type === 'task_progress') {
+        setShowOrchestratorUI(true);
+        setOrchestratorTasks((prev) => {
+          const idx = prev.findIndex((t) => t.id === event.taskId);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = {
+              ...updated[idx],
+              status: event.status || updated[idx].status,
+              events: [...(updated[idx].events || []), event],
+              filesChanged: event.filesChanged || updated[idx].filesChanged || [],
+              duration: event.duration || updated[idx].duration,
+              error: event.error || updated[idx].error,
+            };
+            return updated;
+          }
+          return [...prev, {
+            id: event.taskId,
+            agent: event.agent || 'claude',
+            status: event.status || 'running',
+            events: [event],
+            filesChanged: event.filesChanged || [],
+            duration: event.duration,
+            error: event.error,
+          }];
+        });
+      } else if (event.type === 'task_complete') {
+        setOrchestratorTasks((prev) =>
+          prev.map((t) =>
+            t.id === event.taskId
+              ? { ...t, status: 'done', filesChanged: event.filesChanged || t.filesChanged, duration: event.duration }
+              : t
+          )
+        );
+      } else if (event.type === 'task_error') {
+        setOrchestratorTasks((prev) =>
+          prev.map((t) =>
+            t.id === event.taskId
+              ? { ...t, status: 'error', error: event.error }
+              : t
+          )
+        );
+      } else if (event.type === 'compare_ready') {
+        setOrchestratorCompareData(event.data);
+      }
     });
 
     const handleKey = (e: KeyboardEvent) => {
@@ -122,6 +189,7 @@ export default function App() {
       cleanupMsg?.();
       cleanupStatus?.();
       cleanupPerm?.();
+      cleanupOrch?.();
       window.removeEventListener('keydown', handleKey);
     };
   }, []);
@@ -193,6 +261,45 @@ export default function App() {
   const handlePermissionDecision = (decision: 'allow' | 'deny' | 'always-allow') => {
     window.api?.respondPermission(decision);
     setPermissionReq(null);
+  };
+
+  // ── Orchestrator handlers ──────────────────────────────────────────
+  const handleOrchestratorMerge = async (taskId: string) => {
+    try {
+      await window.api.mergeTask(taskId);
+      setOrchestratorTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: 'merged' } : t))
+      );
+    } catch (err: any) {
+      handleAddSystemMessage(`Merge failed: ${err?.message || String(err)}`);
+    }
+  };
+
+  const handleOrchestratorDiscard = async (taskId: string) => {
+    try {
+      await window.api.discardTask(taskId);
+      setOrchestratorTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: 'cancelled' } : t))
+      );
+    } catch (err: any) {
+      handleAddSystemMessage(`Discard failed: ${err?.message || String(err)}`);
+    }
+  };
+
+  const handleOrchestratorCompare = () => {
+    if (orchestratorCompareData) {
+      setShowCompareView(true);
+    }
+  };
+
+  const handleCompareAccept = async (taskId: string) => {
+    await handleOrchestratorMerge(taskId);
+    setShowCompareView(false);
+    setOrchestratorCompareData(null);
+  };
+
+  const handleCompareClose = () => {
+    setShowCompareView(false);
   };
 
   // ── Sidebar content ───────────────────────────────────────────────
@@ -285,11 +392,12 @@ export default function App() {
     }
   };
 
-  // ── Main content (debate panel) ───────────────────────────────────
-  const mainContent = (
+  // ── Main content (debate panel or orchestrator dashboard) ──────────
+  const debatePanelContent = (
     <DebatePanel
       messages={messages}
       status={status}
+      statusData={statusData}
       projectPath={projectPath}
       selectedMode={selectedMode}
       settingsVersion={settingsVersion}
@@ -315,6 +423,33 @@ export default function App() {
       }}
     />
   );
+
+  const mainContent = showOrchestratorUI && orchestratorTasks.length > 0 ? (
+    <div className="flex flex-col h-full">
+      <AgentDashboard
+        tasks={orchestratorTasks}
+        compareReady={orchestratorCompareData !== null}
+        onMerge={handleOrchestratorMerge}
+        onDiscard={handleOrchestratorDiscard}
+        onCompare={handleOrchestratorCompare}
+      />
+      {/* Toggle back to debate view */}
+      <div
+        className="flex-shrink-0 flex items-center justify-center py-1"
+        style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-1)' }}
+      >
+        <button
+          onClick={() => setShowOrchestratorUI(false)}
+          className="text-xs px-3 py-1 rounded transition"
+          style={{ color: 'var(--text-3)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-1)')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-3)')}
+        >
+          Back to Debate
+        </button>
+      </div>
+    </div>
+  ) : debatePanelContent;
 
   // ── Right panel content — editor is always mounted to preserve state ─
   const rightContent = rightPanel !== null ? (
@@ -347,13 +482,18 @@ export default function App() {
           <span className="text-sm font-semibold tracking-tight" style={{ color: 'var(--text-1)' }}>
             debaterAI
           </span>
-          <StatusDot status={status} selectedMode={selectedMode} />
+          <StatusDot status={status} selectedMode={selectedMode} statusData={statusData} />
         </div>
 
         <div className="flex items-center gap-1">
           <TitleButton onClick={handleNewSession}>New</TitleButton>
           {projectPath && (
             <TitleButton onClick={handleShowDiff}>Diff</TitleButton>
+          )}
+          {orchestratorTasks.length > 0 && (
+            <TitleButton onClick={() => setShowOrchestratorUI((p) => !p)}>
+              Agents
+            </TitleButton>
           )}
           <TitleButton onClick={() => setShowTerminal((p) => !p)}>
             Terminal
@@ -405,6 +545,25 @@ export default function App() {
           onDecision={handlePermissionDecision}
         />
       )}
+
+      {/* Compare View overlay */}
+      {showCompareView && orchestratorCompareData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+        >
+          <div
+            className="w-[80vw] h-[80vh] rounded-lg overflow-hidden shadow-xl"
+            style={{ border: '1px solid var(--border)' }}
+          >
+            <CompareView
+              data={orchestratorCompareData}
+              onAccept={handleCompareAccept}
+              onClose={handleCompareClose}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -425,7 +584,7 @@ function TitleButton({ onClick, children }: { onClick: () => void; children: Rea
   );
 }
 
-function StatusDot({ status, selectedMode }: { status: string; selectedMode?: DebateMode }) {
+function StatusDot({ status, selectedMode, statusData }: { status: string; selectedMode?: DebateMode; statusData?: any }) {
   const debatingLabel = selectedMode === 'claude-only'
     ? 'Claude working'
     : selectedMode === 'codex-only'
@@ -433,19 +592,30 @@ function StatusDot({ status, selectedMode }: { status: string; selectedMode?: De
       : 'Debating';
 
   const labels: Record<string, { label: string; dotClass: string }> = {
-    idle:      { label: 'Ready',       dotClass: 'dot-idle' },
-    thinking:  { label: 'Thinking',    dotClass: 'dot-thinking' },
-    debating:  { label: debatingLabel, dotClass: 'dot-debating' },
-    consensus: { label: 'Consensus',   dotClass: 'dot-consensus' },
-    coding:    { label: 'Coding',      dotClass: 'dot-coding' },
-    done:      { label: 'Done',        dotClass: 'dot-done' },
-    error:     { label: 'Error',       dotClass: 'dot-error' },
+    idle:                  { label: 'Ready',       dotClass: 'dot-idle' },
+    thinking:              { label: 'Thinking',    dotClass: 'dot-thinking' },
+    debating:              { label: debatingLabel, dotClass: 'dot-debating' },
+    consensus:             { label: 'Consensus',   dotClass: 'dot-consensus' },
+    awaiting_confirmation: { label: 'Awaiting',    dotClass: 'dot-consensus' },
+    awaiting_tiebreak:     { label: 'Tiebreak',    dotClass: 'dot-consensus' },
+    coding:                { label: 'Coding',      dotClass: 'dot-coding' },
+    worktree_review:       { label: 'Review',      dotClass: 'dot-done' },
+    done:                  { label: 'Done',        dotClass: 'dot-done' },
+    error:                 { label: 'Error',       dotClass: 'dot-error' },
   };
   const cfg = labels[status] || labels.idle;
   return (
     <div className="flex items-center gap-1.5">
       <span className={`dot ${cfg.dotClass}`} />
       <span className="text-xs" style={{ color: 'var(--text-3)' }}>{cfg.label}</span>
+      {statusData?.branch && (
+        <span
+          className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+          style={{ background: 'var(--bg-3)', color: 'var(--accent)' }}
+        >
+          {statusData.branch}
+        </span>
+      )}
     </div>
   );
 }

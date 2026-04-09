@@ -2,10 +2,12 @@
 // debaterAI — Core Types
 // ============================================================================
 
+import { AgentEvent } from './agent-events';
+
 export type AIProvider = 'claude' | 'codex';
 export type TransportType = 'api' | 'cli';
 export type DebateMode = 'debate' | 'claude-only' | 'codex-only';
-export type DebateStatus = 'idle' | 'thinking' | 'debating' | 'consensus' | 'coding' | 'done' | 'error';
+export type DebateStatus = 'idle' | 'thinking' | 'debating' | 'consensus' | 'coding' | 'done' | 'error' | 'awaiting_confirmation' | 'awaiting_tiebreak' | 'worktree_review';
 export type Agreement = 'agree' | 'partial' | 'disagree';
 export type MessageRole = 'user' | 'claude' | 'codex' | 'system';
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
@@ -19,7 +21,7 @@ export interface DebateMessage {
   round?: number;
   agreement?: Agreement;
   codeBlocks?: CodeBlock[];
-  agentEvents?: any[];       // AgentEvent[] from agent-events.ts
+  agentEvents?: AgentEvent[];
   filesChanged?: string[];
   toolsUsed?: string[];
 }
@@ -44,6 +46,16 @@ export interface DebateSession {
   maxRounds: number;
   consensus?: ConsensusResult;
   artifactMessageId?: string;
+  executionCwd?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
+  worktreeBaseBranch?: string;
+  consensusPlan?: string;
+  pendingUserInput?: string;
+  /** Claude CLI session UUID for debate phase (tools disabled, max-turns 1) */
+  claudeDebateSessionId?: string;
+  /** Codex CLI session UUID for debate phase (captured from session_meta on first exec) */
+  codexDebateSessionId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -102,9 +114,9 @@ export interface AISettings {
     preferredMode: DebateMode;
     maxRounds: number;
     autoApply: boolean;
+    alwaysUseWorktree?: boolean;
   };
   git: {
-    useWorktree: boolean;
     autoCommit: boolean;
     commitPrefix: string;
   };

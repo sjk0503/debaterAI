@@ -24,7 +24,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'help', description: 'Show all available commands', icon: '❓', category: 'info', handler: 'help' },
   { name: 'history', description: 'Show debate history summary', icon: '📜', category: 'info', handler: 'history' },
   // Git
-  { name: 'checkpoint', description: 'Create git checkpoint', icon: '💾', category: 'git', handler: 'checkpoint' },
+  { name: 'checkpoint', description: 'Create file snapshot checkpoint', icon: '💾', category: 'git', handler: 'checkpoint' },
   { name: 'rollback', description: 'Rollback to last checkpoint', icon: '⏪', category: 'git', handler: 'rollback' },
 ];
 

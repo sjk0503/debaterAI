@@ -14,8 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // ── Checkpoints ─────────────────────────────────────────────────────────
-  createCheckpoint: (projectPath: string, description: string) =>
-    ipcRenderer.invoke('checkpoint:create', { projectPath, description }),
+  createCheckpoint: (projectPath: string, description: string, targetFiles?: string[]) =>
+    ipcRenderer.invoke('checkpoint:create', { projectPath, description, targetFiles }),
   rollbackCheckpoint: (checkpointId: string) =>
     ipcRenderer.invoke('checkpoint:rollback', { checkpointId }),
   listCheckpoints: (projectPath: string) =>
@@ -50,10 +50,18 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('debate:validateStart'),
   startDebate: (prompt: string, projectPath: string, mode?: string, sessionId?: string) =>
     ipcRenderer.invoke('debate:start', { prompt, projectPath, mode, sessionId }),
-  intervene: (decision: string) =>
-    ipcRenderer.invoke('debate:intervene', { decision }),
+  intervene: (debateId: string, message: string) =>
+    ipcRenderer.invoke('debate:intervene', { debateId, message }),
+  resolveTiebreak: (debateId: string, winner: 'claude' | 'codex') =>
+    ipcRenderer.invoke('debate:resolveTiebreak', { debateId, winner }),
   applyCode: (debateId: string) =>
     ipcRenderer.invoke('debate:apply', { debateId }),
+  confirmConsensus: (debateId: string, useWorktree: boolean) =>
+    ipcRenderer.invoke('debate:confirmConsensus', { debateId, useWorktree }),
+  mergeWorktree: (debateId: string) =>
+    ipcRenderer.invoke('debate:mergeWorktree', { debateId }),
+  discardWorktree: (debateId: string) =>
+    ipcRenderer.invoke('debate:discardWorktree', { debateId }),
 
   onDebateMessage: (cb: (msg: any) => void) => {
     ipcRenderer.on('debate:message', (_e, msg) => cb(msg));

@@ -78,7 +78,7 @@ export class ClaudeCodeService extends EventEmitter {
       allowedTools?: string[];
       timeout?: number;
     } = {},
-  ): Promise<{ output: string; exitCode: number }> {
+  ): Promise<{ output: string; exitCode: number; isSpawnError?: boolean }> {
     return new Promise((resolve) => {
       const args = ['--print', '--output-format', 'text'];
 
@@ -118,7 +118,7 @@ export class ClaudeCodeService extends EventEmitter {
       });
 
       proc.on('error', (err) => {
-        resolve({ output: err.message, exitCode: 1 });
+        resolve({ output: err.message, exitCode: -1, isSpawnError: true });
       });
     });
   }

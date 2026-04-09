@@ -9,6 +9,9 @@ interface PromptContext {
   projectContext: string;
   previousRounds: Array<{ claudeResponse: string; codexResponse: string; agreement: string }>;
   agentMode?: boolean;
+  language?: 'ko' | 'en';
+  previousAgreement?: 'agree' | 'partial' | 'disagree';
+  userGuidance?: string;
 }
 
 export function buildSystemPrompt(ctx: PromptContext): string {
@@ -32,6 +35,15 @@ Both you and ${otherAgent} have access to the SAME project directory and the SAM
 - Reference files by path (e.g., "see src/main/index.ts line 42") instead of quoting them
 - Only include code snippets that are NEW or CHANGED — not existing code
 - When discussing existing code, refer to it by file path and function/class name` : ''}`);
+
+  // Section 1.5: Language Constraint
+  const langMap: Record<string, string> = {
+    ko: '한국어(Korean)',
+    en: 'English',
+  };
+  const langName = langMap[ctx.language || 'ko'] || langMap['ko'];
+  parts.push(`## Language
+You MUST respond in ${langName}. All prose, analysis, and commentary must be in ${langName}. Technical terms, code identifiers, and file paths may remain in English.`);
 
   // Section 2: Role Definition
   if (ctx.mode === 'debate') {
@@ -89,10 +101,14 @@ The following project context has been automatically collected:`);
   if (ctx.projectContext) {
     // Truncate to avoid excessive prompt size
     const maxContextLen = 8000;
-    const truncatedContext =
-      ctx.projectContext.length > maxContextLen
-        ? ctx.projectContext.slice(0, maxContextLen) + '\n\n... (truncated for brevity)'
-        : ctx.projectContext;
+    let truncatedContext: string;
+    if (ctx.projectContext.length > maxContextLen) {
+      const lastNewline = ctx.projectContext.lastIndexOf('\n', maxContextLen);
+      const cutAt = lastNewline > 0 ? lastNewline : maxContextLen;
+      truncatedContext = ctx.projectContext.slice(0, cutAt) + '\n\n... (truncated for brevity)';
+    } else {
+      truncatedContext = ctx.projectContext;
+    }
     parts.push(truncatedContext);
   }
 
@@ -103,14 +119,22 @@ The following project context has been automatically collected:`);
       const roundIdx = ctx.previousRounds.indexOf(round) + 1;
       // Truncate long responses to keep context manageable
       const maxRespLen = 3000;
-      const claudeResp =
-        round.claudeResponse.length > maxRespLen
-          ? round.claudeResponse.slice(0, maxRespLen) + '\n... (truncated)'
-          : round.claudeResponse;
-      const codexResp =
-        round.codexResponse.length > maxRespLen
-          ? round.codexResponse.slice(0, maxRespLen) + '\n... (truncated)'
-          : round.codexResponse;
+      let claudeResp: string;
+      if (round.claudeResponse.length > maxRespLen) {
+        const lastNl = round.claudeResponse.lastIndexOf('\n', maxRespLen);
+        const cutAt = lastNl > 0 ? lastNl : maxRespLen;
+        claudeResp = round.claudeResponse.slice(0, cutAt) + '\n... (truncated)';
+      } else {
+        claudeResp = round.claudeResponse;
+      }
+      let codexResp: string;
+      if (round.codexResponse.length > maxRespLen) {
+        const lastNl = round.codexResponse.lastIndexOf('\n', maxRespLen);
+        const cutAt = lastNl > 0 ? lastNl : maxRespLen;
+        codexResp = round.codexResponse.slice(0, cutAt) + '\n... (truncated)';
+      } else {
+        codexResp = round.codexResponse;
+      }
 
       parts.push(`### Round ${roundIdx} (${round.agreement})
 **Claude's proposal:**
@@ -159,13 +183,31 @@ IMPORTANT RULES:
 - Keep responses focused and concise`);
   }
 
+  // Section: Disagree escalation (Fix 16)
+  if (ctx.mode === 'debate' && ctx.previousAgreement === 'disagree') {
+    parts.push(`## Previous Round Warning
+⚠️ 이전 라운드에서 상대가 강하게 반대했습니다. 반대 논점을 구체적으로 반박하거나, 합의할 수 있는 대안을 제시하세요.`);
+  }
+
+  // Section: User guidance (Fix 15)
+  if (ctx.mode === 'debate' && ctx.userGuidance) {
+    parts.push(`## User Direction
+The user has provided the following guidance for this round: "${ctx.userGuidance}".
+Take this into account in your response.`);
+  }
+
   if (ctx.mode === 'debate') {
-    parts.push(`## Agreement Signal
+    parts.push(`## Agreement Signal — STRICT RULES
 
 At the END of your response, you MUST include exactly one of:
-[AGREEMENT: agree] — if you fully agree with the approach
-[AGREEMENT: partial] — if you partially agree but have suggestions
-[AGREEMENT: disagree] — if you fundamentally disagree and propose an alternative`);
+
+[AGREEMENT: agree] — Use ONLY when you have NOTHING to add, critique, or suggest. If you identify even ONE issue, gap, correction, or alternative — do NOT use agree. "Overall correct" or "generally right" is NOT agree.
+
+[AGREEMENT: partial] — Use when you agree with the general direction BUT have any of the following: critiques of specific points, additional risks or edge cases to raise, suggestions for improvement, corrections to details, or nuances to add. This is the DEFAULT when you have substantive input.
+
+[AGREEMENT: disagree] — Use when you fundamentally disagree with the approach and propose a different direction.
+
+**IMPORTANT**: If you wrote any sentence like "하지만...", "다만...", "놓친 부분이...", "과장됐다", "추가로...", "however", "but", "missing", "overlooked", "exaggerated" — you MUST use partial, NOT agree. Do not mark agree just because the overall direction is acceptable.`);
   }
 
   return parts.join('\n\n');

@@ -16,6 +16,7 @@ export type SessionEventType =
   | 'consensus'
   | 'system_message'
   | 'mode_change'
+  | 'worktree_created'
   | 'session_end';
 
 export interface SessionEvent {
@@ -33,6 +34,7 @@ export type SessionEventData =
   | { kind: 'consensus'; agreement: Agreement; round: number; decidedBy: string }
   | { kind: 'system_message'; content: string }
   | { kind: 'mode_change'; from: DebateMode; to: DebateMode }
+  | { kind: 'worktree_created'; worktreePath: string; branchName: string; baseBranch: string }
   | { kind: 'session_end'; reason: 'completed' | 'cancelled' | 'error' };
 
 // ── Session Metadata (fast listing without reading full JSONL) ──────────

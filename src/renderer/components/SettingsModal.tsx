@@ -121,24 +121,25 @@ export function SettingsModal({ onClose }: Props) {
                     <span className="text-xs text-gray-400">합의 후 자동으로 코드 적용</span>
                   </label>
                 </Field>
+
+                <Field label="워크트리 격리">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.debate.alwaysUseWorktree ?? false}
+                      onChange={(e) => setSettings({ ...settings, debate: { ...settings.debate, alwaysUseWorktree: e.target.checked } })}
+                      className="rounded"
+                    />
+                    <span className="text-xs text-gray-400">매 토론마다 워크트리 생성</span>
+                  </label>
+                  <p className="text-[10px] text-gray-600 mt-1">토론 후 코드 실행 시 자동으로 격리된 워크트리에서 작업합니다</p>
+                </Field>
               </div>
             )}
 
             {tab === 'git' && (
               <div className="space-y-4">
                 <h3 className="text-sm font-bold text-gray-300">Git 설정</h3>
-
-                <Field label="워크트리 격리">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settings.git.useWorktree}
-                      onChange={(e) => setSettings({ ...settings, git: { ...settings.git, useWorktree: e.target.checked } })}
-                      className="rounded"
-                    />
-                    <span className="text-xs text-gray-400">토론마다 별도 Git 워크트리에서 작업</span>
-                  </label>
-                </Field>
 
                 <Field label="자동 커밋">
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -160,6 +161,7 @@ export function SettingsModal({ onClose }: Props) {
                     placeholder="debaterai:"
                     className="input-field"
                   />
+                  <p className="text-[10px] text-gray-600 mt-1">커밋 메시지 접두사 (예: debaterai: implement feature)</p>
                 </Field>
               </div>
             )}

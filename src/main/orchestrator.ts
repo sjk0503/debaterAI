@@ -71,9 +71,16 @@ export class Orchestrator {
 
     const baseBranch = await this.gitService.currentBranch(projectPath);
 
-    // Create worktrees for each agent
+    // Create worktrees for each agent (clean up first if second fails)
     const claudeWt = await this.gitService.createWorktree(projectPath, `claude-${sessionId.slice(0, 8)}`);
-    const codexWt = await this.gitService.createWorktree(projectPath, `codex-${sessionId.slice(0, 8)}`);
+    let codexWt;
+    try {
+      codexWt = await this.gitService.createWorktree(projectPath, `codex-${sessionId.slice(0, 8)}`);
+    } catch (err) {
+      // Clean up first worktree to avoid orphaned worktrees
+      await this.gitService.removeWorktree(projectPath, claudeWt.worktreePath).catch(() => {});
+      throw err;
+    }
 
     // Create tasks with server-side metadata
     const claudeTask = this.taskManager.create({
@@ -114,9 +121,27 @@ export class Orchestrator {
     });
 
     // Wait for both to finish
-    await Promise.allSettled([claudePromise, codexPromise]);
+    const [claudeSettled, codexSettled] = await Promise.allSettled([claudePromise, codexPromise]);
 
-    // Both done — compute diff between worktrees
+    // Handle individual failures — update task status and emit errors
+    if (claudeSettled.status === 'rejected') {
+      const errMsg = claudeSettled.reason?.message || String(claudeSettled.reason);
+      this.taskManager.updateStatus(claudeTask.id, 'error', errMsg);
+      this.emitEvent(onEvent, 'task_error', sessionId, claudeTask.id, {
+        agent: 'claude',
+        error: errMsg,
+      });
+    }
+    if (codexSettled.status === 'rejected') {
+      const errMsg = codexSettled.reason?.message || String(codexSettled.reason);
+      this.taskManager.updateStatus(codexTask.id, 'error', errMsg);
+      this.emitEvent(onEvent, 'task_error', sessionId, codexTask.id, {
+        agent: 'codex',
+        error: errMsg,
+      });
+    }
+
+    // Only compute diff when BOTH agents succeeded
     if (claudeTask.status === 'done' && codexTask.status === 'done') {
       try {
         const diff = await this.gitService.diffBranches(
@@ -162,6 +187,7 @@ export class Orchestrator {
       task.worktreePath,
       task.branchName,
       commitMessage || `debaterai: merge ${task.agent} implementation`,
+      task.baseBranch,
     );
 
     if (result.merged) {
@@ -202,7 +228,7 @@ export class Orchestrator {
     this.emitEvent(opts.onEvent, 'task_started', task.sessionId, task.id, { agent: task.agent });
 
     try {
-      const result = await this.agentRuntime.spawn({
+      const { agentId, done } = this.agentRuntime.spawn({
         prompt: task.prompt,
         cwd: task.worktreePath,
         model: opts.model,
@@ -222,7 +248,10 @@ export class Orchestrator {
         },
       });
 
-      this.taskManager.setAgentId(task.id, result.agentId);
+      // agentId is available immediately — link task to agent for cancellation
+      this.taskManager.setAgentId(task.id, agentId);
+
+      const result = await done;
       task.filesChanged = result.filesChanged;
 
       // Commit changes in the worktree

@@ -28,10 +28,18 @@ interface PendingToolUse {
   inputJson: string;
 }
 
+interface PendingToolResult {
+  toolUseId: string;
+  output: string;
+  isError: boolean;
+}
+
 export class ClaudeStreamParser {
   private lineBuffer = '';
   private fullText = '';
   private pendingToolUse: PendingToolUse | null = null;
+  private pendingToolResult: PendingToolResult | null = null;
+  private completedTools: Map<string, { toolName: string }> = new Map();
   private toolsUsed: string[] = [];
   private filesChanged: string[] = [];
 
@@ -108,6 +116,13 @@ export class ClaudeStreamParser {
           } else if (cls === 'file_write') {
             this.emit('status', { kind: 'status', message: `Editing file...` });
           }
+        } else if (block?.type === 'tool_result') {
+          // Tool result block — contains the output of a previous tool_use
+          this.pendingToolResult = {
+            toolUseId: block.tool_use_id || '',
+            output: typeof block.content === 'string' ? block.content : '',
+            isError: !!block.is_error,
+          };
         } else if (block?.type === 'thinking') {
           this.emit('status', { kind: 'status', message: 'Thinking...' });
         }
@@ -117,8 +132,13 @@ export class ClaudeStreamParser {
       case 'content_block_delta': {
         const delta = event.delta;
         if (delta?.type === 'text_delta' && delta.text) {
-          this.fullText += delta.text;
-          this.emit('text_delta', { kind: 'text_delta', text: delta.text });
+          if (this.pendingToolResult) {
+            // Text delta inside a tool_result block — accumulate as output
+            this.pendingToolResult.output += delta.text;
+          } else {
+            this.fullText += delta.text;
+            this.emit('text_delta', { kind: 'text_delta', text: delta.text });
+          }
         } else if (delta?.type === 'input_json_delta' && this.pendingToolUse) {
           this.pendingToolUse.inputJson += delta.partial_json || '';
         } else if (delta?.type === 'thinking_delta' && delta.thinking) {
@@ -128,7 +148,20 @@ export class ClaudeStreamParser {
       }
 
       case 'content_block_stop': {
-        if (this.pendingToolUse) {
+        if (this.pendingToolResult) {
+          // Tool result block completed — emit tool_use_done with captured output
+          const toolUseId = this.pendingToolResult.toolUseId;
+          const saved = this.completedTools.get(toolUseId);
+          this.emit('tool_use_done', {
+            kind: 'tool_use_done',
+            toolName: saved?.toolName || 'unknown',
+            toolId: toolUseId,
+            output: this.pendingToolResult.output,
+            isError: this.pendingToolResult.isError,
+          });
+          this.completedTools.delete(toolUseId);
+          this.pendingToolResult = null;
+        } else if (this.pendingToolUse) {
           // Parse tool input to extract file path / command
           try {
             const input = JSON.parse(this.pendingToolUse.inputJson || '{}');
@@ -143,16 +176,24 @@ export class ClaudeStreamParser {
               this.emit('bash_exec', { kind: 'bash_exec', command: input.command });
             }
 
-            // Close the tool lifecycle
+            // Remember this tool for matching with its result later
+            this.completedTools.set(this.pendingToolUse.toolId, {
+              toolName: this.pendingToolUse.toolName,
+            });
+
+            // Close the tool lifecycle (output will be updated when tool_result arrives)
             this.emit('tool_use_done', {
               kind: 'tool_use_done',
               toolName: this.pendingToolUse.toolName,
               toolId: this.pendingToolUse.toolId,
-              output: '',  // output comes from tool_result in later turns
+              output: '',
               isError: false,
             });
           } catch {
             // Failed to parse — still close the tool lifecycle
+            this.completedTools.set(this.pendingToolUse.toolId, {
+              toolName: this.pendingToolUse.toolName,
+            });
             this.emit('tool_use_done', {
               kind: 'tool_use_done',
               toolName: this.pendingToolUse.toolName,
@@ -165,9 +206,6 @@ export class ClaudeStreamParser {
         }
         break;
       }
-
-      // Tool result comes as a separate assistant message with tool_result
-      // In stream-json, results appear in the conversation flow
 
       case 'message_stop':
       case 'message_delta': {

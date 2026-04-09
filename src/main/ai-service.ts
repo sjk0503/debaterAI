@@ -44,7 +44,6 @@ const store = new Store({
         autoApply: false,
       },
       git: {
-        useWorktree: true,
         autoCommit: false,
         commitPrefix: 'debaterai:',
       },
@@ -191,6 +190,83 @@ export class AIService {
   ): Promise<string> {
     const adapter = this.getCodexAdapter();
     return adapter.ask(systemPrompt, messages, onStream);
+  }
+
+  /**
+   * Debate-mode Claude call — uses session for context continuity.
+   * First turn: pass sessionId + sessionResume=false → creates session with --session-id.
+   * Subsequent turns: pass same sessionId + sessionResume=true → uses --resume.
+   * Tools are disabled (--tools "") and --max-turns 1 to force single-turn text reply.
+   * CLI only. API falls back to regular askClaude (stateless, history rebuilt from messages).
+   */
+  async askClaudeDebate(
+    sessionId: string,
+    sessionResume: boolean,
+    systemPrompt: string,
+    messages: TransportMessage[],
+    onStream?: (chunk: string) => void,
+  ): Promise<string> {
+    const settings = this.getSettings();
+
+    if (settings.claude.selectedTransport === 'cli') {
+      const adapter = new ClaudeCliAdapter(
+        this.claudeCode,
+        settings.claude.model,
+        this.projectPath || process.cwd(),
+        settings.claude.effort,
+        { sessionId, sessionResume, disableTools: true },
+      );
+      return adapter.ask(systemPrompt, messages, onStream);
+    }
+
+    // API fallback — no real session, just rebuild messages
+    return this.askClaude(systemPrompt, messages, onStream);
+  }
+
+  /**
+   * Debate-mode Codex call — uses session for context continuity.
+   *
+   * First turn: sessionResume=false → runs `codex exec --sandbox read-only`
+   *             After exit, scans ~/.codex/sessions/ for the most recent rollout
+   *             file created during this spawn. That filename's UUID is the
+   *             real resumable id (session_meta/thread.started ids are unreliable).
+   *
+   * Subsequent turns: pass sessionId from the rollout scan + sessionResume=true
+   *                   → runs `codex exec resume <rolloutUuid>`
+   *
+   * If resume fails (e.g., rollout file deleted), caller should fall back to a
+   * fresh exec and replay previous rounds as prompt context.
+   *
+   * Sandbox is read-only (debate mode has no file writes). resume does not
+   * accept --sandbox; Codex inherits the original session's sandbox policy.
+   */
+  async askCodexDebate(
+    sessionId: string | undefined,
+    sessionResume: boolean,
+    systemPrompt: string,
+    messages: TransportMessage[],
+    onStream?: (chunk: string) => void,
+    onSessionMeta?: (uuid: string) => void,
+  ): Promise<string> {
+    const settings = this.getSettings();
+
+    if (settings.codex.selectedTransport === 'cli') {
+      const adapter = new CodexCliAdapter(
+        this.codexCli,
+        settings.codex.model,
+        this.projectPath || process.cwd(),
+        {
+          sessionId,
+          sessionResume,
+          sandbox: 'read-only',
+          onSessionMeta, // fires when rollout file is detected on disk
+        },
+      );
+      return adapter.ask(systemPrompt, messages, onStream);
+    }
+
+    // API fallback
+    return this.askCodex(systemPrompt, messages, onStream);
   }
 
   // ============================================================================

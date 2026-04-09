@@ -1,9 +1,104 @@
 import { spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { ClaudeCodeService } from './claude-code-service';
 import { CodexCliService } from './codex-cli-service';
 import { ClaudeStreamParser } from './stream-parsers/claude-stream-parser';
+
+/**
+ * Find and verify the Codex rollout JSONL file created during a debate exec.
+ * Returns the resumable session UUID, or null if no valid rollout is found.
+ *
+ * Codex CLI writes sessions to ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl.
+ * Verification (filename recency alone is racy):
+ *   1. File mtime >= sinceMs (created during this exec)
+ *   2. First JSONL line is `session_meta` with payload.id
+ *   3. session_meta.payload.cwd matches expected cwd
+ *   4. Optional sandbox policy check (skipped — only first turn matters)
+ *
+ * @param sinceMs  Timestamp before the exec started (filesystem clock safe)
+ * @param expectedCwd  The projectPath passed to -C (for cwd match verification)
+ */
+function findLatestCodexRolloutSince(sinceMs: number, expectedCwd?: string): string | null {
+  try {
+    const sessionsRoot = path.join(os.homedir(), '.codex', 'sessions');
+    if (!fs.existsSync(sessionsRoot)) return null;
+
+    // Walk only recent YYYY/MM/DD dirs — today and yesterday cover creation window
+    const now = new Date();
+    const candidates: Array<{ full: string; mtime: number }> = [];
+
+    for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
+      const d = new Date(now.getTime() - dayOffset * 86400000);
+      const yyyy = String(d.getFullYear());
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const dayDir = path.join(sessionsRoot, yyyy, mm, dd);
+      if (!fs.existsSync(dayDir)) continue;
+
+      for (const name of fs.readdirSync(dayDir)) {
+        if (!name.startsWith('rollout-') || !name.endsWith('.jsonl')) continue;
+        const full = path.join(dayDir, name);
+        try {
+          const st = fs.statSync(full);
+          if (st.mtimeMs >= sinceMs) {
+            candidates.push({ full, mtime: st.mtimeMs });
+          }
+        } catch {}
+      }
+    }
+
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => b.mtime - a.mtime);
+
+    // Verify each candidate by reading session_meta + turn_context events.
+    // We need:
+    //   1. session_meta.payload.id — the resumable UUID
+    //   2. session_meta.payload.cwd === expectedCwd (match current project)
+    //   3. turn_context.payload.sandbox_policy.type === 'read-only' (debate contract)
+    for (const cand of candidates) {
+      try {
+        // Read enough of the file to cover session_meta + first turn_context
+        const fd = fs.openSync(cand.full, 'r');
+        const buf = Buffer.alloc(64 * 1024); // 64KB covers the opening events
+        const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
+        fs.closeSync(fd);
+
+        const content = buf.subarray(0, bytesRead).toString('utf-8');
+        const lines = content.split('\n').filter((l) => l.trim());
+
+        let sessionMeta: any = null;
+        let turnContext: any = null;
+        for (const line of lines) {
+          try {
+            const ev = JSON.parse(line);
+            if (!sessionMeta && ev.type === 'session_meta') sessionMeta = ev;
+            if (!turnContext && ev.type === 'turn_context') turnContext = ev;
+            if (sessionMeta && turnContext) break;
+          } catch {}
+        }
+
+        if (!sessionMeta?.payload?.id) continue;
+        if (expectedCwd && sessionMeta.payload.cwd !== expectedCwd) continue;
+
+        // Verify sandbox policy if turn_context is present — debate contract is read-only
+        const sbType = turnContext?.payload?.sandbox_policy?.type;
+        if (sbType && sbType !== 'read-only') continue;
+
+        return sessionMeta.payload.id;
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // ============================================================================
 // Transport Adapter — abstraction over API / CLI execution paths
@@ -84,12 +179,22 @@ export class ClaudeApiAdapter implements TransportAdapter {
 // Prompt is piped via stdin to avoid OS ARG_MAX limits on long debates.
 // ============================================================================
 
+export interface ClaudeCliAdapterOptions {
+  /** Session UUID — if set, this specific session will be used (new if sessionResume=false, resume if true) */
+  sessionId?: string;
+  /** If true, use --resume to continue existing session. If false, use --session-id to create new. */
+  sessionResume?: boolean;
+  /** If true, disable all tools (`--tools ""`) — used for debate mode (text-only responses) */
+  disableTools?: boolean;
+}
+
 export class ClaudeCliAdapter implements TransportAdapter {
   constructor(
     private cli: ClaudeCodeService,
     private model: string,
     private cwd: string,
     private effort?: string,
+    private options: ClaudeCliAdapterOptions = {},
   ) {}
 
   async ask(
@@ -111,14 +216,51 @@ export class ClaudeCliAdapter implements TransportAdapter {
     onStream?: (chunk: string) => void,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const args = [
+      const args: string[] = [];
+
+      // NOTE: --bare would be ideal for debate mode (strips MCP/plugins/hooks)
+      // but it REQUIRES ANTHROPIC_API_KEY — "OAuth and keychain are never read".
+      // CLI transport is specifically for subscription/OAuth users, so --bare
+      // would break auth entirely. We rely on --tools "" + --max-turns 1 to
+      // minimize pollution. Hidden turns from hooks/plugins may still happen
+      // but they don't produce assistant text in stdout, so the final response
+      // stays clean from the user's perspective.
+
+      args.push(
         '--print',
         '--output-format', 'stream-json',
         '--verbose',
-        '--system-prompt', systemPrompt,
         '--model', this.model,
-        '--max-turns', '20',
-      ];
+      );
+
+      // Session management
+      if (this.options.sessionResume && this.options.sessionId) {
+        args.push('--resume', this.options.sessionId);
+      } else {
+        if (this.options.sessionId) {
+          args.push('--session-id', this.options.sessionId);
+        }
+        args.push('--system-prompt', systemPrompt);
+      }
+
+      // Debate mode: disable ALL tools (built-in + MCP) and limit to single turn.
+      //
+      // Critical: `--tools ""` only disables built-in tools. MCP servers are
+      // still loaded and Claude will try to invoke them (e.g., claude-mem,
+      // codex-dialog), hitting permission walls and consuming the --max-turns
+      // budget on tool attempts → exits with `error_max_turns`.
+      //
+      // Fix: combine `--strict-mcp-config --mcp-config '{"mcpServers":{}}'`
+      // to override the default MCP config with an empty one, disabling all
+      // MCP servers for this invocation.
+      if (this.options.disableTools) {
+        args.push('--tools', '');
+        args.push('--strict-mcp-config');
+        args.push('--mcp-config', '{"mcpServers":{}}');
+        args.push('--max-turns', '1');
+      } else {
+        args.push('--max-turns', '20');
+      }
 
       if (this.effort) {
         args.push('--effort', this.effort);
@@ -129,7 +271,8 @@ export class ClaudeCliAdapter implements TransportAdapter {
         args.push(prompt);
       }
 
-      const proc = spawn(this.cli.resolveBinary(), args, {
+      const binaryPath = this.cli.resolveBinary();
+      const proc = spawn(binaryPath, args, {
         cwd: this.cwd,
         env: { ...process.env, FORCE_COLOR: '0' },
         timeout: 300000,
@@ -142,6 +285,7 @@ export class ClaudeCliAdapter implements TransportAdapter {
       }
 
       let stderr = '';
+      let rawStdout = ''; // captured for error diagnostics
 
       // Use stream parser to extract text from structured events
       const parser = new ClaudeStreamParser(`cli-${Date.now()}`, (event: any) => {
@@ -151,7 +295,9 @@ export class ClaudeCliAdapter implements TransportAdapter {
       });
 
       proc.stdout?.on('data', (data: Buffer) => {
-        parser.feed(data.toString());
+        const str = data.toString();
+        rawStdout += str;
+        parser.feed(str);
       });
 
       proc.stderr?.on('data', (data: Buffer) => {
@@ -167,8 +313,22 @@ export class ClaudeCliAdapter implements TransportAdapter {
         } else if (code === 0) {
           resolve(fullText);
         } else {
-          // Real error — reject even if there's partial text
-          reject(new Error(`Claude CLI exited with code ${code}: ${stderr}`));
+          // Real error — include everything we captured for diagnosis
+          const argsSanitized = args.map((a) => {
+            if (a.length > 200) return `<${a.length}chars>`;
+            return a;
+          });
+          const lastStdout = rawStdout.slice(-2000);
+          const errorDetail = [
+            `code=${code}`,
+            `bin=${binaryPath}`,
+            `cwd=${this.cwd}`,
+            `args=${argsSanitized.join(' ')}`,
+            `stderr=${stderr || '(empty)'}`,
+            `stdout(tail)=${lastStdout || '(empty)'}`,
+          ].join(' | ');
+          console.error('[ClaudeCliAdapter] spawn failed:', errorDetail);
+          reject(new Error(`Claude CLI exited with code ${code}: ${stderr || lastStdout.slice(0, 500) || '(no output)'}`));
         }
       });
 
@@ -266,11 +426,23 @@ export class OpenAIApiAdapter implements TransportAdapter {
 // to the user prompt.
 // ============================================================================
 
+export interface CodexCliAdapterOptions {
+  /** Session UUID — captured from session_meta event on first exec, passed to resume on subsequent calls */
+  sessionId?: string;
+  /** If true, use `codex exec resume <sessionId>` to continue existing session */
+  sessionResume?: boolean;
+  /** Sandbox policy: 'read-only' (debate) or 'workspace-write' (implementation). Only applied on initial exec, not on resume. */
+  sandbox?: 'read-only' | 'workspace-write';
+  /** Callback invoked when a session_meta event is parsed (receives the new session UUID) */
+  onSessionMeta?: (sessionId: string) => void;
+}
+
 export class CodexCliAdapter implements TransportAdapter {
   constructor(
     private cli: CodexCliService,
     private model: string,
     private cwd: string,
+    private options: CodexCliAdapterOptions = {},
   ) {}
 
   async ask(
@@ -290,14 +462,27 @@ export class CodexCliAdapter implements TransportAdapter {
     onStream?: (chunk: string) => void,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const args = [
-        'exec',
-        '--json',
-        '--ephemeral',
-        '--sandbox', 'read-only',
-        '--model', this.model,
-        '-C', this.cwd,
-      ];
+      const useResume = this.options.sessionResume && this.options.sessionId;
+      // Capture start time to detect rollout files created during this exec.
+      // Codex `thread.started` event's id is NOT the resumable id — we must
+      // find the actual rollout file that was written during this spawn.
+      const startTime = Date.now() - 1000; // 1s backdate for filesystem clock drift
+
+      const args: string[] = useResume
+        ? [
+            'exec',
+            'resume',
+            this.options.sessionId!,
+            '--json',
+            '--model', this.model,
+          ]
+        : [
+            'exec',
+            '--json',
+            '--sandbox', this.options.sandbox || 'read-only',
+            '--model', this.model,
+            '-C', this.cwd,
+          ];
 
       // Pipe via stdin for long prompts to avoid ARG_MAX
       const useStdin = Buffer.byteLength(prompt, 'utf8') > 100000;
@@ -329,6 +514,10 @@ export class CodexCliAdapter implements TransportAdapter {
           if (!line.trim()) continue;
           try {
             const event = JSON.parse(line);
+
+            // NOTE: session_meta/thread.started ids are NOT reliably resumable.
+            // The real resumable id comes from the rollout file written on disk,
+            // which we scan for in the close handler below.
 
             // Extract text from item.completed events with agent_message type
             if (event.type === 'item.completed' && event.item) {
@@ -377,6 +566,17 @@ export class CodexCliAdapter implements TransportAdapter {
             }
           } catch {
             // Ignore
+          }
+        }
+
+        // Only for fresh exec (not resume): scan filesystem for the actual
+        // rollout file written during this process. Verify the first
+        // session_meta event matches our cwd to guard against race conditions
+        // where another concurrent codex exec races with ours.
+        if (!useResume && this.options.onSessionMeta) {
+          const rolloutUuid = findLatestCodexRolloutSince(startTime, this.cwd);
+          if (rolloutUuid) {
+            this.options.onSessionMeta(rolloutUuid);
           }
         }
 
